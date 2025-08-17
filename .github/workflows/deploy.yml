@@ -27,8 +27,6 @@ jobs:
           touch .env
           echo 'API_KEY=${{ secrets.API_KEY }}' >> .env
           echo 'ADMIN_ACCOUNT_KEY=${{ secrets.ADMIN_ACCOUNT_KEY }}' >> .env
-        working-directory: ./service
 
       - name: 'Deploy to App Engine'
         run: gcloud app deploy --quiet
-        working-directory: ./service
