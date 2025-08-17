@@ -1,0 +1,34 @@
+name: Deploy Service to App Engine
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.GCLOUD_SERVICE_KEY }}'
+          project_id: habitsapi-426700
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: 'Create env file'
+        run: |
+          touch .env
+          echo 'API_KEY=${{ secrets.API_KEY }}' >> .env
+          echo 'ADMIN_ACCOUNT_KEY=${{ secrets.ADMIN_ACCOUNT_KEY }}' >> .env
+        working-directory: ./service
+
+      - name: 'Deploy to App Engine'
+        run: gcloud app deploy --quiet
+        working-directory: ./service
