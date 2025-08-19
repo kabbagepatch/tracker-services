@@ -9,8 +9,14 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
+const WebSocket = require("ws");
+const http = require("http");
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
 const userRoutes = require('./users');
 const habitRoutes = require('./habits');
+// const weekendRoutes = require('./weekend');
 
 const firebaseConfig = {
   apiKey: process.env.API_KEY,
@@ -70,8 +76,21 @@ app.get('/', (req, res) => {
 app.use('/users', userRoutes);
 app.use('/habits', authenticate, habitRoutes);
 
+wss.on("connection", (ws) => {
+  ws.on("message", (message) => {
+    const data = JSON.parse(message);
+    if (data.type === "toggle") {
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: "update", title: data.title, completed: data.completed }));
+        }
+      });
+    }
+  });
+});
+
 // Listen to the App Engine-specified port, or 8080 otherwise
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}...`);
 });
