@@ -16,7 +16,7 @@ const wss = new WebSocket.Server({ server });
 
 const userRoutes = require('./users');
 const habitRoutes = require('./habits');
-// const weekendRoutes = require('./weekend');
+const { router: weekendRoutes, items } = require('./weekends');
 
 const firebaseConfig = {
   apiKey: process.env.API_KEY,
@@ -75,17 +75,25 @@ app.get('/', (req, res) => {
 
 app.use('/users', userRoutes);
 app.use('/habits', authenticate, habitRoutes);
+app.use('/weekend-tasks', weekendRoutes);
 
 wss.on("connection", (ws) => {
+  // send initial tasks
+  ws.send(JSON.stringify({ type: "init", items }));
+
   ws.on("message", (message) => {
     const data = JSON.parse(message);
-    if (data.type === "toggle") {
-      wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({ type: "update", title: data.title, completed: data.completed }));
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        if (data.type === "update") {
+          items.find(i => i.id === data.item.id).completed = data.item.completed;
+          client.send(JSON.stringify({ type: "update", item: data.item }));
+        } else if (data.type === "reset") {
+          items.forEach(item => item.completed = false);
+          client.send(JSON.stringify({ type: "reset", items }));
         }
-      });
-    }
+      }
+    });
   });
 });
 

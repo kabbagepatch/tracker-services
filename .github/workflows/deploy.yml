@@ -3,7 +3,7 @@ name: Deploy Service to App Engine
 on:
   push:
     branches:
-      - main
+      - main-app
 
 jobs:
   deploy:
