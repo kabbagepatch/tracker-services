@@ -83,7 +83,8 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (message) => {
     const data = JSON.parse(message);
-    if (data.type === "update") sendNotifications(data.item);
+    if (data.type === "update" && data.item.completed) sendNotifications(data.item);
+    if (data.type === "reset") sendNotifications({ reset: true });
     wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         if (data.type === "update") {

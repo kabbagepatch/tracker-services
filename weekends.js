@@ -73,9 +73,13 @@ router.post('/subscribe', express.json(), async (req, res) => {
   //handle push subscription
   const subscription = req.body;
   console.log('Received subscription: ', subscription);
+  let id = 'kav';
+  if (subscription.endpoint.includes('apple')) {
+    id = 'bwi';
+  }
 
   try {
-    const subscriptionKey = datastore.key('Subscription');
+    const subscriptionKey = datastore.key(['Subscription', id]);
     await datastore.save({ key: subscriptionKey, data: subscription });
     res.status(201).send({ message: 'Subscription received' });
   } catch (err) {
@@ -91,11 +95,12 @@ const sendNotifications = async (item) => {
   const payload = JSON.stringify(item);
 
   for (const subscription of subscriptions) {
+    const id = subscription[datastore.KEY].id || subscription[datastore.KEY].name;
     try {
-      const res = await webpush.sendNotification(subscription, payload)
-      console.log('Notification sent', subscription[datastore.KEY].id, res.statusCode);
+      await webpush.sendNotification(subscription, payload)
+      console.log('Notification sent to', id);
     } catch (err) {
-      console.error('Error sending notification, removing subscription', subscription[datastore.KEY].id);
+      console.error('Error', err.statusCode, 'sending notification, removing subscription for', id);
       await datastore.delete(subscription[datastore.KEY]);
     }
   }

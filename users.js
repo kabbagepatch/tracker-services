@@ -6,8 +6,6 @@ const datastore = new Datastore();
 const express = require('express');
 const router = express.Router();
 
-const server = require('./server');
-
 const authenticate = async (req, res, next) => {
   const idToken = req.headers.authorization && req.headers.authorization.split('Bearer ')[1];
   if (!idToken) {
