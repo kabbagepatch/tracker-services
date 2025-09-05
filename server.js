@@ -16,7 +16,7 @@ const wss = new WebSocket.Server({ server });
 
 const userRoutes = require('./users');
 const habitRoutes = require('./habits');
-const { router: weekendRoutes, items } = require('./weekends');
+const { router: weekendRoutes, items, sendNotifications } = require('./weekends');
 
 const firebaseConfig = {
   apiKey: process.env.API_KEY,
@@ -83,6 +83,7 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (message) => {
     const data = JSON.parse(message);
+    if (data.type === "update") sendNotifications(data.item);
     wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         if (data.type === "update") {
