@@ -21,7 +21,7 @@
     "id": "dusting",
     "title": "Dusting",
     "desc": "Dust all surfaces, including the vinyl player, bookshelf, and any other surfaces.",
-    "status": "in-progress"
+    "status": "incomplete"
   },
   {
     "id": "vacuuming",
