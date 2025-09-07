@@ -1,0 +1,32 @@
+[
+  {
+    "id": "laundry",
+    "title": "Laundry",
+    "desc": "Wash, dry, and fold any laundry in the basket.",
+    "status": "incomplete"
+  },
+  {
+    "id": "bathroom",
+    "title": "Bathroom Deep Cleaning",
+    "desc": "Clean the bathroom from top to bottom, including the sink and shower. Clean Mercy's litterbox.",
+    "status": "incomplete"
+  },
+  {
+    "id": "kitchen",
+    "title": "Kitchen Counter Cleaning",
+    "desc": "Clean the counter top, including under and behind any appliances. No 3Dness allowed.",
+    "status": "incomplete"
+  },
+  {
+    "id": "dusting",
+    "title": "Dusting",
+    "desc": "Dust all surfaces, including the vinyl player, bookshelf, and any other surfaces.",
+    "status": "in-progress"
+  },
+  {
+    "id": "vacuuming",
+    "title": "Vacuuming",
+    "desc": "Vacuum the floors, including the bathroom, kitchen, and any other rooms.",
+    "status": "incomplete"
+  }
+]

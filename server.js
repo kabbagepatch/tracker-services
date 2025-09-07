@@ -9,14 +9,14 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-const WebSocket = require("ws");
-const http = require("http");
+const WebSocket = require('ws');
+const http = require('http');
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const userRoutes = require('./users');
 const habitRoutes = require('./habits');
-const { router: weekendRoutes, items, sendNotifications } = require('./weekends');
+const { router: weekendRoutes, items, sendNotifications, updateItem, getItems, resetItems } = require('./weekends');
 
 const firebaseConfig = {
   apiKey: process.env.API_KEY,
@@ -77,22 +77,24 @@ app.use('/users', userRoutes);
 app.use('/habits', authenticate, habitRoutes);
 app.use('/weekend-tasks', weekendRoutes);
 
-wss.on("connection", (ws) => {
+wss.on('connection', (ws) => {
   // send initial tasks
-  ws.send(JSON.stringify({ type: "init", items }));
+  ws.send(JSON.stringify({ type: 'init', items: getItems() }));
 
-  ws.on("message", (message) => {
+  ws.on('message', (message) => {
     const data = JSON.parse(message);
-    if (data.type === "update" && data.item.completed) sendNotifications(data.item);
-    if (data.type === "reset") sendNotifications({ reset: true });
+    if (data.type === 'update' && data.item.status === 'complete') sendNotifications(data.item);
+    if (data.type === 'reset') sendNotifications({ reset: true });
     wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        if (data.type === "update") {
-          items.find(i => i.id === data.item.id).completed = data.item.completed;
-          client.send(JSON.stringify({ type: "update", item: data.item }));
-        } else if (data.type === "reset") {
-          items.forEach(item => item.completed = false);
-          client.send(JSON.stringify({ type: "reset", items }));
+        if (data.type === 'update') {
+          const item = updateItem(data.item.id, data.item.status);
+          // items.find(i => i.id === data.item.id).completed = data.item.completed;
+          client.send(JSON.stringify({ type: 'update', item }));
+        } else if (data.type === 'reset') {
+          const items = resetItems();
+          // items.forEach(item => item.completed = false);
+          client.send(JSON.stringify({ type: 'reset', items }));
         }
       }
     });

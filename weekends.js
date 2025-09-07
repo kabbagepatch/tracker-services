@@ -1,3 +1,4 @@
+const fs = require('fs');
 const express = require('express');
 const router = express.Router();
 
@@ -15,57 +16,48 @@ webpush.setVapidDetails(
   vapidKeys.privateKey
 );
 
-const items = [
-  {
-    id: 'laundry',
-    title: "Laundry",
-    desc: "Wash, dry, and fold any laundry in the basket.",
-    completed: false
-  },
-  {
-    id: 'bathroom',
-    title: "Bathroom Deep Cleaning",
-    desc: "Clean the bathroom from top to bottom, including the sink and shower. Clean Mercy's litterbox.",
-    completed: false
-  },
-  {
-    id: 'kitchen',
-    title: "Kitchen Counter Cleaning",
-    desc: "Clean the counter top, including under and behind any appliances. No 3Dness allowed.",
-    completed: false
-  },
-  {
-    id: 'dusting',
-    title: "Dusting",
-    desc: "Dust all surfaces, including the vinyl player, bookshelf, and any other surfaces.",
-    completed: false
-  },
-  {
-    id: 'vacuuming',
-    title: "Vacuuming",
-    desc: "Vacuum the floors, including the bathroom, kitchen, and any other rooms.",
-    completed: false
+const getItems = () => {
+  const data = fs.readFileSync('weekend-tasks.json');
+  return JSON.parse(data);
+}
+
+const updateItem = (id, status) => {
+  const items = getItems();
+  const item = items.find(i => i.id === id);
+  if (item) {
+    item.status = status;
+    fs.writeFileSync('weekend-tasks.json', JSON.stringify(items, null, 2));
   }
-];
+
+  return item;
+}
+
+const resetItems = () => {
+  const items = getItems();
+  items.forEach(item => item.status = 'incomplete');
+  fs.writeFileSync('weekend-tasks.json', JSON.stringify(items, null, 2));
+
+  return items;
+}
 
 router.get('/', async (req, res) => {
+  const items = getItems();
   res.status(200).send(items);
 });
 
 router.post('/:id/toggle', express.json(), (req, res) => {
   const { id } = req.params;
-  const { completed } = req.body;
-  const item = items.find(i => i.id === id);
-  if (item) {
-    item.completed = completed;
-    res.status(200).send({ message: `Toggled ${item.title}`, item });
+  const { status } = req.body;
+  const updatedItem = updateItem(id, status);
+  if (updatedItem) {
+    res.status(200).send({ message: `Toggled ${updatedItem.title}`, item: updatedItem });
   } else {
-    res.status(404).send({ message: `Item ${item.title} not found` });
+    res.status(404).send({ message: `Item ${id} not found` });
   }
 });
 
 router.post('/reset', (req, res) => {
-  items.forEach(item => item.completed = false);
+  const items = resetItems();
   res.status(200).send({ message: 'Reset all tasks', items });
 });
 
@@ -98,7 +90,6 @@ const sendNotifications = async (item) => {
     const id = subscription[datastore.KEY].id || subscription[datastore.KEY].name;
     try {
       await webpush.sendNotification(subscription, payload)
-      console.log('Notification sent to', id);
     } catch (err) {
       console.error('Error', err.statusCode, 'sending notification, removing subscription for', id);
       await datastore.delete(subscription[datastore.KEY]);
@@ -106,4 +97,4 @@ const sendNotifications = async (item) => {
   }
 };
 
-module.exports = { router, items, sendNotifications };
+module.exports = { router, getItems, updateItem, resetItems, sendNotifications };
