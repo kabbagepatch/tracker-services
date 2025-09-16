@@ -1,9 +1,11 @@
-const fs = require('fs');
 const express = require('express');
 const router = express.Router();
 
 const {Datastore} = require('@google-cloud/datastore');
 const datastore = new Datastore();
+
+const bodyParser = require('body-parser');
+const jsonParser = bodyParser.json();
 
 const webpush = require('web-push');
 const vapidKeys = {
@@ -16,52 +18,99 @@ webpush.setVapidDetails(
   vapidKeys.privateKey
 );
 
-const getItems = () => {
-  const data = fs.readFileSync('weekend-tasks.json');
-  return JSON.parse(data);
+const getItems = async () => {
+  const query = datastore.createQuery('WeekendTask').order('createdAt', { descending: false });
+  const [tasks] = await datastore.runQuery(query);
+  const tasksWithId = tasks.map(task => {
+    task.id = task[datastore.KEY].name;
+    return task;
+  });
+
+  return tasksWithId;
 }
 
-const updateItem = (id, status) => {
-  const items = getItems();
-  const item = items.find(i => i.id === id);
-  if (item) {
-    item.status = status;
-    fs.writeFileSync('weekend-tasks.json', JSON.stringify(items, null, 2));
+const updateItem = async (id, status) => {
+  const itemKey = datastore.key(['WeekendTask', id]);
+  const [item] = await datastore.get(itemKey);
+  item.status = status;
+  await datastore.save({ key: itemKey, data: item });
+
+  return { ...item, id };
+}
+
+const resetItems = async () => {
+  const tasks = await getItems();
+  const resetTasks = tasks.map(task => {
+    task.status = 'incomplete';
+    return { key: task[datastore.KEY], data: task };
+  });
+
+  await datastore.upsert(resetTasks);
+
+  return resetTasks.map(t => ({ ...t.data, id: t.key.name }));
+}
+
+router.get('/', async (req, res, next) => {
+  try {
+    const tasks = await getItems();
+    res.status(200).send(tasks);
+  } catch (err) {
+    next(err);
   }
-
-  return item;
-}
-
-const resetItems = () => {
-  const items = getItems();
-  items.forEach(item => item.status = 'incomplete');
-  fs.writeFileSync('weekend-tasks.json', JSON.stringify(items, null, 2));
-
-  return items;
-}
-
-router.get('/', async (req, res) => {
-  const items = getItems();
-  res.status(200).send(items);
 });
 
-router.post('/:id/toggle', express.json(), (req, res) => {
+router.post('/', jsonParser, async (req, res, next) => {
+  const {
+    id,
+    title,
+    desc,
+    status,
+  } = req.body || {};
+
+  if (!title) {
+    return res.status(400).send('Task title is required');
+  }
+
+  try {
+    const itemKey = datastore.key(['WeekendTask', id]);
+    const curDate = new Date();
+    const newItem = {
+      key: itemKey,
+      data: {
+        title,
+        desc,
+        status: status || 'incomplete',
+        createdAt: curDate,
+      }
+    }
+    await datastore.save(newItem);
+    res.status(201).json({ message: `Task ${itemKey.name} created`, item: { ...newItem.data, id: itemKey.id } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/toggle', jsonParser, async (req, res, next) => {
   const { id } = req.params;
   const { status } = req.body;
-  const updatedItem = updateItem(id, status);
-  if (updatedItem) {
-    res.status(200).send({ message: `Toggled ${updatedItem.title}`, item: updatedItem });
-  } else {
-    res.status(404).send({ message: `Item ${id} not found` });
+
+  try {
+    const item = await updateItem(id, status);
+    res.status(200).send({ message: `Toggled ${item.title}`, item });
+  } catch (err) {
+    next(err);
   }
 });
 
-router.post('/reset', (req, res) => {
-  const items = resetItems();
-  res.status(200).send({ message: 'Reset all tasks', items });
+router.post('/reset', async (req, res, next) => {
+  try {
+    res.status(200).send({ message: 'All tasks reset', items: await resetItems() });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.post('/subscribe', express.json(), async (req, res) => {
+router.post('/subscribe', express.json(), async (req, res, next) => {
   //handle push subscription
   const subscription = req.body;
   console.log('Received subscription: ', subscription);

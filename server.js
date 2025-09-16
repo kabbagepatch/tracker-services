@@ -77,22 +77,23 @@ app.use('/users', userRoutes);
 app.use('/habits', authenticate, habitRoutes);
 app.use('/weekend-tasks', weekendRoutes);
 
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws) => {
   // send initial tasks
-  ws.send(JSON.stringify({ type: 'init', items: getItems() }));
+  ws.send(JSON.stringify({ type: 'init', items: await getItems() }));
 
-  ws.on('message', (message) => {
+  ws.on('message', async (message) => {
     const data = JSON.parse(message);
-    if (data.type === 'update' && data.item.status === 'complete') sendNotifications(data.item);
-    if (data.type === 'reset') sendNotifications({ reset: true });
-    wss.clients.forEach((client) => {
+    console.log({ data });
+    if (data.type === 'update' && data.item.status === 'complete') await sendNotifications(data.item);
+    if (data.type === 'reset') await sendNotifications({ reset: true });
+    wss.clients.forEach(async (client) => {
       if (client.readyState === WebSocket.OPEN) {
         if (data.type === 'update') {
-          const item = updateItem(data.item.id, data.item.status);
+          const item = await updateItem(data.item.id, data.item.status);
           // items.find(i => i.id === data.item.id).completed = data.item.completed;
           client.send(JSON.stringify({ type: 'update', item }));
         } else if (data.type === 'reset') {
-          const items = resetItems();
+          const items = await resetItems();
           // items.forEach(item => item.completed = false);
           client.send(JSON.stringify({ type: 'reset', items }));
         }
