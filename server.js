@@ -5,9 +5,23 @@ const firebaseAdmin = require('firebase-admin');
 const firebaseAuth = require('firebase/auth');
 
 const express = require('express');
-const cors = require('cors');
 const app = express();
+
+const cors = require('cors');
 app.use(cors());
+
+const { rateLimit } = require('express-rate-limit');
+const limiter = rateLimit({
+	windowMs: 15 * 60 * 1000, // 15 minutes
+	limit: 100,
+	standardHeaders: 'draft-8',
+	legacyHeaders: false, // Disable the `X-RateLimit-*` headers.
+	ipv6Subnet: 56,
+})
+app.use(limiter)
+
+const helmet = require('helmet');
+app.use(helmet());
 
 const WebSocket = require('ws');
 const http = require('http');
