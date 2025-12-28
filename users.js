@@ -1,10 +1,10 @@
-const firebaseAuth = require('firebase/auth');
+import * as firebaseAuth from 'firebase/auth';
 
-const {Datastore} = require('@google-cloud/datastore');
-const datastore = new Datastore();
-
-const express = require('express');
+import express from 'express';
 const router = express.Router();
+
+import { Datastore } from '@google-cloud/datastore';
+const datastore = new Datastore();
 
 const authenticate = async (req, res, next) => {
   const idToken = req.headers.authorization && req.headers.authorization.split('Bearer ')[1];
@@ -108,4 +108,4 @@ router.get('/admin/token', async (req, res, next) => {
 });
 
 
-module.exports = router;
+export default router;

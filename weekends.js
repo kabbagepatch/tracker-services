@@ -1,13 +1,13 @@
-const express = require('express');
-const router = express.Router();
+import express from 'express';
+export const router = express.Router();
 
-const {Datastore} = require('@google-cloud/datastore');
+import { Datastore } from '@google-cloud/datastore';
 const datastore = new Datastore();
 
-const bodyParser = require('body-parser');
+import bodyParser from 'body-parser';
 const jsonParser = bodyParser.json();
 
-const webpush = require('web-push');
+import webpush from 'web-push';
 const vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY,
   privateKey: process.env.VAPID_PRIVATE_KEY
@@ -18,7 +18,7 @@ webpush.setVapidDetails(
   vapidKeys.privateKey
 );
 
-const getItems = async () => {
+export const getItems = async () => {
   const query = datastore.createQuery('WeekendTask').order('createdAt', { descending: false });
   const [tasks] = await datastore.runQuery(query);
   const tasksWithId = tasks.map(task => {
@@ -29,7 +29,7 @@ const getItems = async () => {
   return tasksWithId;
 }
 
-const updateItem = async (id, status) => {
+export const updateItem = async (id, status) => {
   const itemKey = datastore.key(['WeekendTask', id]);
   const [item] = await datastore.get(itemKey);
   item.status = status;
@@ -38,7 +38,7 @@ const updateItem = async (id, status) => {
   return { ...item, id };
 }
 
-const resetItems = async () => {
+export const resetItems = async () => {
   const tasks = await getItems();
   const resetTasks = tasks.map(task => {
     task.status = 'incomplete';
@@ -129,7 +129,7 @@ router.post('/subscribe', express.json(), async (req, res, next) => {
   }
 });
 
-const sendNotifications = async (item) => {
+export const sendNotifications = async (item) => {
   const query = datastore.createQuery('Subscription');
   const [subscriptions] = await datastore.runQuery(query);
 
@@ -145,5 +145,3 @@ const sendNotifications = async (item) => {
     }
   }
 };
-
-module.exports = { router, getItems, updateItem, resetItems, sendNotifications };

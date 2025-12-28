@@ -1,36 +1,39 @@
-require('dotenv').config();
+import 'dotenv/config';
+import { readFileSync } from 'fs';
 
-const firebase = require('firebase/app');
-const firebaseAdmin = require('firebase-admin');
-const firebaseAuth = require('firebase/auth');
+import * as firebase from 'firebase/app';
+import firebaseAdmin from 'firebase-admin';
+import * as firebaseAuth from 'firebase/auth';
 
-const express = require('express');
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
+
 const app = express();
 
-const cors = require('cors');
-app.use(cors());
-
-const { rateLimit } = require('express-rate-limit');
 const limiter = rateLimit({
-	windowMs: 15 * 60 * 1000, // 15 minutes
-	limit: 100,
-	standardHeaders: 'draft-8',
-	legacyHeaders: false, // Disable the `X-RateLimit-*` headers.
-	ipv6Subnet: 56,
-})
-app.use(limiter)
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 100,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers.
+  ipv6Subnet: 56,
+});
 
-const helmet = require('helmet');
+app.use(cors());
+app.use(limiter);
 app.use(helmet());
 
-const WebSocket = require('ws');
-const http = require('http');
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+import { WebSocketServer } from 'ws';
+import http from 'http';
 
-const userRoutes = require('./users');
-const habitRoutes = require('./habits');
-const { router: weekendRoutes, items, sendNotifications, updateItem, getItems, resetItems } = require('./weekends');
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+import userRoutes from './users.js';
+import habitRoutes from './habits.js';
+import { router as weekendRoutes, sendNotifications, updateItem, getItems, resetItems } from './weekends.js';
+import vinylRoutes from './vinyls.js';
 
 const firebaseConfig = {
   apiKey: process.env.API_KEY,
@@ -47,7 +50,9 @@ let serviceAccount;
 if (process.env.ADMIN_ACCOUNT_KEY) {
   serviceAccount = JSON.parse(process.env.ADMIN_ACCOUNT_KEY);
 } else {
-  serviceAccount = require(process.env.ADMIN_ACCOUNT_JSON_PATH);
+  serviceAccount = JSON.parse(
+    readFileSync(process.env.ADMIN_ACCOUNT_JSON_PATH, 'utf8')
+  );
 }
 firebaseAdmin.initializeApp({
   credential: firebaseAdmin.credential.cert(serviceAccount)
@@ -89,6 +94,7 @@ app.get('/', (req, res) => {
 
 app.use('/users', userRoutes);
 app.use('/habits', authenticate, habitRoutes);
+app.use('/vinyls', vinylRoutes);
 app.use('/weekend-tasks', weekendRoutes);
 
 wss.on('connection', async (ws) => {
@@ -116,8 +122,19 @@ wss.on('connection', async (ws) => {
   });
 });
 
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    message: err.message || 'Internal Server Error',
+  });
+})
+
 // Listen to the App Engine-specified port, or 8080 otherwise
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}...`);
 });
+
+
+// executeQuery('SELECT user.User FROM user where user = ? LIMIT 2', ['dev']);
+// initializeDatabase();

@@ -1,10 +1,10 @@
-const {Datastore} = require('@google-cloud/datastore');
-const datastore = new Datastore();
-
-const express = require('express');
+import express from 'express';
 const router = express.Router();
 
-const bodyParser = require('body-parser');
+import { Datastore } from '@google-cloud/datastore';
+const datastore = new Datastore();
+
+import bodyParser from 'body-parser';
 const jsonParser = bodyParser.json();
 
 function getDayOfYear(date) {
@@ -216,4 +216,4 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
-module.exports = router;
+export default router;
