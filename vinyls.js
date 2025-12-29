@@ -4,34 +4,25 @@ const router = express.Router();
 import bodyParser from 'body-parser';
 const jsonParser = bodyParser.json();
 
-import { executeQueries, executeQuery, getItems, getItemsById, insertItem, removeItem, removeItems } from "./mysql.js"
+import { executeQuery, getItems, getItemsById, insertItem, removeItem, removeItems } from "./mysql.js"
 
 export const initializeDatabase = async () => {
   await executeQuery(`
     CREATE TABLE IF NOT EXISTS Vinyls (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      album_name VARCHAR(255) NOT NULL,
-      artist_name VARCHAR(255) NOT NULL,
+      album VARCHAR(255) NOT NULL,
+      artist VARCHAR(255) NOT NULL,
       disc_hex VARCHAR(255) DEFAULT "#000",
       n_sides INT NOT NULL DEFAULT 2,
+      image_url VARCHAR(255) NOT NULL,
+      tags LONGTEXT,
+      tracks LONGTEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   await executeQuery(`
-    CREATE TABLE IF NOT EXISTS Songs (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      vinyl INT NOT NULL,
-      side INT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT FK_VinylSongs FOREIGN KEY (vinyl)
-      REFERENCES Vinyls(id)
-    )
-  `);
-
-  await executeQuery(`
-    CREATE TABLE IF NOT EXISTS SidePlays (
+    CREATE TABLE IF NOT EXISTS VinylPlays (
       id INT AUTO_INCREMENT PRIMARY KEY,
       vinyl INT NOT NULL,
       side INT NOT NULL,
@@ -42,13 +33,57 @@ export const initializeDatabase = async () => {
   `);
 }
 
+router.get('/album/search', async (req, res, next) => {
+  const searchTerm = req.query.album;
+  if (!searchTerm) {
+    return res.status(400).send('Album search term required')
+  }
+  const url = `https://ws.audioscrobbler.com/2.0/?method=album.search&api_key=${process.env.LAST_FM_API_KEY}&album=${searchTerm}&format=json`;
+  const result = await fetch(url);
+  const data = await result.json();
+
+  res.status(200).send(data.results.albummatches.album.filter(a => !!a.mbid).map(a => ({
+    name: a.name,
+    artist: a.artist,
+    image: a.image[a.image.length - 1]['#text']
+  })));
+});
+
+const getAlbum = async (artist, album) => {
+  const url = `https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=${process.env.LAST_FM_API_KEY}&artist=${artist}&album=${album}&format=json`;
+  const result = await fetch(url);
+  const data = await result.json();
+
+  return {
+    name: data.album.name,
+    artist: data.album.artist,
+    tags: data.album.tags.tag.map(t => t.name),
+    image: data.album.image[data.album.image.length - 1]['#text'],
+    tracks: data.album.tracks.track.map(t => t.name),
+  }
+}
+
+router.get('/album', async (req, res, next) => {
+  const album = req.query.album;
+  const artist = req.query.artist;
+  if (!album || !artist) {
+    return res.status(400).send('Album and Artist required')
+  }
+
+  const data = await getAlbum(artist, album);
+  res.status(200).send(data);
+});
+
 router.get('/', async (req, res, next) => {
   try {
     const vinyls = await getItems('Vinyls')
     res.status(200).send(vinyls.map(v => ({
       id: v.id,
-      album: v.album_name,
-      artist: v.artist_name,
+      album: v.album,
+      artist: v.artist,
+      tags: JSON.parse(v.tags),
+      tracks: JSON.parse(v.tracks),
+      imageURL: v.image_url,
       discColor: v.disc_hex,
       nSides: v.n_sides,
     })));
@@ -57,25 +92,10 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-const insertSongs = async (sides, vinyl) => {
-  const songParams = []
-  let query = `
-    INSERT INTO Songs (name, vinyl, side) 
-    VALUES ?
-  `;
-  for (let [side, songs] of sides.entries()) {
-    for (let song of songs) {
-      songParams.push([song, vinyl, side + 1]);
-    }
-  }
-  await executeQuery(query, [songParams]);
-}
-
 router.post('/', jsonParser, async (req, res, next) => {
   const {
     album,
     artist,
-    sides,
     nSides,
     discColor,
   } = req.body || {};
@@ -83,40 +103,39 @@ router.post('/', jsonParser, async (req, res, next) => {
   if (!album) return res.status(400).send('Album name is required');
   if (!artist) return res.status(400).send('Artist name is required');
 
-  let columns = 'album_name,artist_name';
-  const values = [album, artist];
+  const data = await getAlbum(artist, album);
+  let columns = 'album,artist,tags,tracks,image_url';
+  const values = [album, artist, JSON.stringify(data.tags), JSON.stringify(data.tracks), data.image];
   if (discColor) {
     columns += ',disc_hex'
     values.push(discColor);
   }
-  if (sides || nSides) {
+  if (nSides) {
     columns += ',n_sides'
-    values.push(nSides || sides.length);
+    values.push(nSides);
   }
 
   try {
     const result = await insertItem('Vinyls', columns, values);
-    if (sides) {
-      await insertSongs(sides, result.insertId);
-    }
-    res.status(201).send({ id: result.insertId, ...req.body });
+    res.status(201).send({ id: result.insertId, ...data });
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/history', jsonParser, async (req, res, next) => {
+router.get('/history', async (req, res, next) => {
   try {
     const query = `
-      SELECT Vinyls.album_name, Vinyls.artist_name, SidePlays.id, SidePlays.side, SidePlays.created_at
-      FROM SidePlays INNER JOIN Vinyls
-      ON SidePlays.vinyl = Vinyls.id
+      SELECT VinylPlays.id, Vinyls.album, Vinyls.artist, Vinyls.image_url, VinylPlays.side, VinylPlays.created_at
+      FROM VinylPlays INNER JOIN Vinyls
+      ON VinylPlays.vinyl = Vinyls.id
     `
     const result = await executeQuery(query);
     res.status(200).send(result.map(p => ({
       playId: p.id,
-      album: p.album_name,
-      artist: p.artist_name,
+      album: p.album,
+      artist: p.artist,
+      imageURL: p.image_url,
       side: p.side,
       timestamp: p.created_at,
     })));
@@ -132,17 +151,15 @@ router.get('/:id', async (req, res, next) => {
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
-    const songs = await getItems('Songs', `vinyl = ?`, [id])
     res.status(200).send({
       id: vinyl.id,
-      album: vinyl.album_name,
-      artist: vinyl.artist_name,
+      album: vinyl.album,
+      artist: vinyl.artist,
       discColor: vinyl.disc_hex,
       nSides: vinyl.n_sides,
-      songs: songs.map(s => ({
-        name: s.name,
-        side: s.side,
-      })),
+      imageURL: vinyl.image_url,
+      tags: JSON.parse(vinyl.tags),
+      tracks: JSON.parse(vinyl.tracks),
     });
   } catch (err) {
     next(err);
@@ -157,7 +174,7 @@ router.delete('/:id', async (req, res, next) => {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
 
-    await removeItems('Songs', `vinyl = ${id}`)
+    await removeItems('VinylPlays', `vinyl = ${id}`)
     await removeItem('Vinyls', id)
     res.status(204).send();
   } catch (err) {
@@ -173,10 +190,10 @@ router.get('/:id/plays', jsonParser, async (req, res, next) => {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
 
-    const result = await getItems('SidePlays', 'vinyl = ?', [id]);
+    const result = await getItems('VinylPlays', 'vinyl = ?', [id]);
     res.status(200).send({
-      album: vinyl.album_name,
-      artist: vinyl.artist_name,
+      album: vinyl.album,
+      artist: vinyl.artist,
       plays: result.map(p => ({
         playId: p.id,
         side: p.side,
@@ -198,8 +215,16 @@ router.post('/:id/plays', jsonParser, async (req, res, next) => {
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
+    if (side) {
+      await insertItem('VinylPlays', 'vinyl,side', [id, side]);
+    } else {
+      const sideParams = [];
+      for (let i = 0; i < vinyl.n_sides; i += 1) {
+        sideParams.push([id, i + 1]);
+      }
+      await executeQuery('INSERT INTO VinylPlays (vinyl,side) VALUES ?', [sideParams]);
+    }
 
-    await insertItem('SidePlays', 'vinyl,side', [id, side]);
     res.status(201).send();
   } catch (err) {
     next(err);
@@ -209,7 +234,7 @@ router.post('/:id/plays', jsonParser, async (req, res, next) => {
 router.delete('/:id/plays/:playId', jsonParser, async (req, res, next) => {
   const { playId } = req.params;
   try {
-    await removeItem('SidePlays', playId);
+    await removeItem('VinylPlays', playId);
     res.status(204).send();
   } catch (err) {
     next(err);
