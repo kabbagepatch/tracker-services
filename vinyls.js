@@ -62,25 +62,29 @@ router.get('/album/search', async (req, res, next) => {
   const data = await result.json();
 
   res.status(200).send(data.results.albummatches.album.filter(a => !!a.mbid).map(a => ({
-    name: a.name,
+    album: a.name,
     artist: a.artist,
-    image: a.image[a.image.length - 1]['#text']
+    imageUrl: a.image[a.image.length - 1]['#text']
   })));
 });
 
 const getAlbum = async (artist, album) => {
-  const url = `https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=${process.env.LAST_FM_API_KEY}&artist=${artist}&album=${album}&format=json`;
-  const result = await fetch(url);
-  const data = await result.json();
+  try {
+    const url = `https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=${process.env.LAST_FM_API_KEY}&artist=${artist}&album=${album}&format=json`;
+    const result = await fetch(url);
+    const data = await result.json();
 
-  return {
-    name: data.album.name,
-    artist: data.album.artist,
-    tags: data.album.tags ? data.album.tags.tag.map(t => t.name) : [],
-    imageUrl: data.album.image[data.album.image.length - 1]['#text'],
-    thumbnailUrl: data.album.image[1]['#text'],
-    published: data.album.wiki ? new Date(data.album.wiki.published).getFullYear() : undefined,
-    tracks: data.album.tracks ? data.album.tracks.track.map(t => t.name) : [],
+    return {
+      album: data.album.name,
+      artist: data.album.artist,
+      tags: data.album.tags ? data.album.tags.tag.map(t => t.name) : [],
+      imageUrl: data.album.image[data.album.image.length - 1]['#text'],
+      thumbnailUrl: data.album.image[1]['#text'],
+      published: data.album.wiki ? new Date(data.album.wiki.published).getFullYear() : undefined,
+      tracks: data.album.tracks && data.album.tracks.track ? data.album.tracks.track.map(t => t.name) : [],
+    }
+  } catch (e) {
+    console.log(e.message);
   }
 }
 
@@ -115,14 +119,14 @@ router.post('/', jsonParser, async (req, res, next) => {
   if (!album) return res.status(400).send('Album name is required');
   if (!artist) return res.status(400).send('Artist name is required');
 
-  const data = await getAlbum(artist, album);
+  const data = await getAlbum(artist, album) || {};
   let columns = 'album,artist,image_url,thumbnail_url';
   const values = [album, artist, data.imageUrl, data.thumbnailUrl];
-  if (data.tags.length > 0) {
+  if (data.tags?.length > 0) {
     columns += ',tags'
     values.push(JSON.stringify(data.tags));
   }
-  if (data.tracks.length > 0) {
+  if (data.tracks?.length > 0) {
     columns += ',tracks'
     values.push(JSON.stringify(data.tracks));
   }
