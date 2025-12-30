@@ -1,6 +1,6 @@
 # Tracker Services
 
-Express server running on gcloud. Contains endpoints for my Habit Tracker and Weekend Tasks Tracker apps
+Express server running on gcloud. Contains endpoints for my Habit Tracker, Weekend Tasks Tracker and Vinyl Tracker apps
 
 ## Run
 
