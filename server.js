@@ -71,6 +71,7 @@ const authenticate = async (req, res, next) => {
       const decodedToken = atob(authHeader.split('Basic ')[1]).split(':');
       await firebaseAuth.signInWithEmailAndPassword(auth, decodedToken[0], decodedToken[1])
       req.user = auth.currentUser;
+      // await firebaseAdmin.auth().setCustomUserClaims(req.user.uid, { admin: true })
       next();
     } else if (authHeader.includes('Bearer ')) {
       const auth = firebaseAdmin.auth();

@@ -17,21 +17,24 @@ const createPool = async () => {
     console.log('Pool Created');
     return pool;
 }
-const poolPromise = createPool();
+const poolPromise = createPool().catch(e => { console.log("Error creatinng mysql pool") });
 
 export const closeConnection = async () => {
     const pool = await poolPromise;
+    if (!pool) return;
     await pool.end();
     connector.close();
 }
 
 const getConnection = async () => {
     const pool = await poolPromise;
+    if (!pool) return;
     return await pool.getConnection();
 }
 
 export const executeQuery = async (query, params) => {
     const conn = await getConnection();
+    if (!conn) return;
     try {
         const [result] = await conn.query(query, params);
 

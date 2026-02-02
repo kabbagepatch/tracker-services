@@ -1,11 +1,10 @@
 import express from 'express';
 const router = express.Router();
 
-import { Datastore } from '@google-cloud/datastore';
-const datastore = new Datastore();
-
 import bodyParser from 'body-parser';
 const jsonParser = bodyParser.json();
+
+import * as datastore from './datastore.js';
 
 function getDayOfYear(date) {
   const start = Date.UTC(date.getFullYear(), 0, 0);
@@ -35,24 +34,20 @@ router.post('/', jsonParser, async (req, res, next) => {
   const { uid } = req.user;
 
   try {
-    const habitKey = datastore.key('Habit');
     const curDate = new Date();
     const year = curDate.getFullYear();
-    const newHabit = {
-      key: habitKey,
-      data: {
-        userId: uid,
-        name,
-        description,
-        frequency, // times per week
-        color,
-        checkInMasks: { [year]: getInitialCheckInMask(year), [year - 1]: getInitialCheckInMask(year - 1) },
-        createdAt: curDate,
-        updatedAt: curDate,
-      }
+    const data = {
+      userId: uid,
+      name,
+      description,
+      frequency, // times per week
+      color,
+      checkInMasks: { [year]: getInitialCheckInMask(year), [year - 1]: getInitialCheckInMask(year - 1) },
+      createdAt: curDate,
+      updatedAt: curDate,
     }
-    await datastore.save(newHabit);
-    res.status(201).json({ message: `Habit ${habitKey.id} created`, habit: { ...newHabit.data, id: habitKey.id } });
+    const id = await datastore.save('Habit', data);
+    res.status(201).json({ message: `Habit ${id} created`, habit: { ...data, id } });
   } catch (err) {
     next(err);
   }
@@ -63,15 +58,11 @@ router.get('/', async (req, res, next) => {
   const { uid } = req.user;
 
   try {
-    let query = datastore.createQuery('Habit');
-    if (uid) {
-      query = query.filter('userId', '=', uid)
-    }
-    const [habits] = await datastore.runQuery(query);
+    const habits = await datastore.query('Habit', {
+      property: 'userId', operator: '=', value: uid
+    });
     const habitsObject = {};
     habits.forEach(habit => {
-      habit.id = habit[datastore.KEY].id;
-      habitsObject[habit.id] = habit;
       const year = new Date().getFullYear();
       if (!habit.checkInMasks) {
         habit.checkInMasks = {};
@@ -89,8 +80,9 @@ router.get('/', async (req, res, next) => {
         habit.checkInMasks[year - 1] = getInitialCheckInMask(year - 1);
       }
       delete habit.checkIns;
-      return habit;
+      habitsObject[habit.id] = habit;
     });
+
     res.status(200).send(habitsObject);
   } catch (err) {
     next(err)
@@ -100,9 +92,16 @@ router.get('/', async (req, res, next) => {
 // Display habit by ID
 router.get('/:id', async (req, res, next) => {
   const { id } = req.params;
+  const { uid } = req.user;
   try {
-    const habitKey = datastore.key(['Habit', datastore.int(id)]);
-    const [habit] = await datastore.get(habitKey);
+    const habit = await datastore.get('Habit', id);
+    if (!habit) {
+      return res.status(404).send('Habit not found');
+    }
+    if (habit.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this habit');
+    }
+
     const year = new Date().getFullYear();
     if (!habit.checkInMasks) {
       habit.checkInMasks = {};
@@ -142,8 +141,7 @@ router.put('/:id', jsonParser, async (req, res, next) => {
   }
 
   try {
-    const habitKey = datastore.key(['Habit', datastore.int(id)]);
-    const [habit] = await datastore.get(habitKey);
+    const habit = await datastore.get('Habit', id);
     if (!habit) {
       return res.status(404).send('Habit not found');
     }
@@ -157,8 +155,8 @@ router.put('/:id', jsonParser, async (req, res, next) => {
     habit.frequency = frequency || habit.frequency;
     habit.updatedAt = new Date();
 
-    await datastore.save({ key: habitKey, data: habit });
-    res.status(200).send({ message: `Habit ${habitKey.id} updated`, habit });
+    await datastore.update('Habit', id, habit);
+    res.status(200).send({ message: `Habit ${id} updated`, habit });
   } catch (err) {
     next(err);
   }
@@ -173,8 +171,7 @@ router.post('/:id/check-in', jsonParser, async (req, res, next) => {
   const { uid } = req.user;
 
   try {
-    const habitKey = datastore.key(['Habit', datastore.int(id)]);
-    const [habit] = await datastore.get(habitKey);
+    const habit = await datastore.get('Habit', id);
     if (!habit) {
       return res.status(404).send('Habit not found');
     }
@@ -192,8 +189,8 @@ router.post('/:id/check-in', jsonParser, async (req, res, next) => {
     checkInsMask = checkInsMask.substring(0, dayOfYear - 1) + (status ? '1' : '0') + checkInsMask.substring(dayOfYear);
     habit.checkInMasks[year] = checkInsMask;
 
-    await datastore.save({ key: habitKey, data: habit });
-    res.status(200).send({ message: `Habit ${habitKey.id} updated`, habit });
+    await datastore.update('Habit', id, habit);
+    res.status(200).send({ message: `Habit ${id} updated`, habit });
   } catch (err) {
     next(err);
   }
@@ -202,15 +199,19 @@ router.post('/:id/check-in', jsonParser, async (req, res, next) => {
 // Delete habit
 router.delete('/:id', async (req, res, next) => {
   const { id } = req.params;
+  const { uid } = req.user;
+
   try {
-    const habitKey = datastore.key(['Habit', datastore.int(id)]);
-    const [habit] = await datastore.get(habitKey);
+    const habit = await datastore.get('Habit', id);
     if (!habit) {
       return res.status(404).send('Habit not found');
     }
+    if (habit.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this habit');
+    }
 
-    await datastore.delete(habitKey);
-    res.status(200).send('Habit deleted succesfully');
+    await datastore.del('Habit', id);
+    res.status(204).send();
   } catch (err) {
     next(err)
   }

@@ -1,3 +1,4 @@
 node_modules/
 *adminsdk*.json
+habitsapi*.json*
 .env

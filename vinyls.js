@@ -4,55 +4,11 @@ const router = express.Router();
 import bodyParser from 'body-parser';
 const jsonParser = bodyParser.json();
 
-import { executeQuery, getItems, getItemsById, insertItem, removeItem, removeItems } from "./mysql.js"
+import * as datastore from './datastore.js';
 
-export const initializeDatabase = async () => {
-  await executeQuery('DROP TABLE VinylPlays');
-  await executeQuery('DROP TABLE Vinyls');
-  await executeQuery(`
-    CREATE TABLE IF NOT EXISTS Vinyls (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      album VARCHAR(255) NOT NULL,
-      artist VARCHAR(255) NOT NULL,
-      disc_color VARCHAR(255) DEFAULT "#000",
-      n_sides INT DEFAULT 2,
-      image_url VARCHAR(255),
-      thumbnail_url VARCHAR(255),
-      published VARCHAR(4),
-      tags LONGTEXT,
-      tracks LONGTEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+/* External APIs */
 
-  await executeQuery(`
-    CREATE TABLE IF NOT EXISTS VinylPlays (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      vinyl INT NOT NULL,
-      side INT NOT NULL,
-      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT FK_VinylSide FOREIGN KEY (vinyl)
-      REFERENCES Vinyls(id)
-    )
-  `);
-}
-
-const vinylMap = (v) => {
-  return {
-    id: v.id,
-    album: v.album,
-    artist: v.artist,
-    tags: JSON.parse(v.tags),
-    tracks: JSON.parse(v.tracks),
-    imageUrl: v.image_url,
-    thumbnailUrl: v.thumbnail_url,
-    published: v.published,
-    discColor: v.disc_color,
-    nSides: v.n_sides,
-  }
-}
-
-router.get('/album/search', async (req, res, next) => {
+router.get('/album/lastfm/search', async (req, res, next) => {
   const searchTerm = req.query.album;
   if (!searchTerm) {
     return res.status(400).send('Album search term required')
@@ -68,7 +24,7 @@ router.get('/album/search', async (req, res, next) => {
   })));
 });
 
-const getAlbum = async (artist, album) => {
+const getAlbumLastFM = async (artist, album) => {
   try {
     const url = `https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=${process.env.LAST_FM_API_KEY}&artist=${artist}&album=${album}&format=json`;
     const result = await fetch(url);
@@ -88,21 +44,75 @@ const getAlbum = async (artist, album) => {
   }
 }
 
-router.get('/album', async (req, res, next) => {
+router.get('/album/lastfm', async (req, res, next) => {
   const album = req.query.album;
   const artist = req.query.artist;
   if (!album || !artist) {
     return res.status(400).send('Album and Artist required')
   }
 
-  const data = await getAlbum(artist, album);
+  const data = await getAlbumLastFM(artist, album);
   res.status(200).send(data);
 });
 
+router.get('/album/discogs/search', async (req, res, next) => {
+  const searchTerm = req.query.album;
+  if (!searchTerm) {
+    return res.status(400).send('Album search term required')
+  }
+  const url = `https://api.discogs.com/database/search?q=${searchTerm}&type=release&format=Vinyl`;
+  const result = await fetch(url, {
+    headers: {
+      "Authorization": `Discogs key=${process.env.DISCOGS_KEY}, secret=${process.env.DISCOGS_SECRET}`
+    }
+  });
+  const data = await result.json();
+
+  res.status(200).send(data.results.map(v => ({
+    discogsId: v.id,
+    title: v.title,
+    published: v.year,
+    genres: v.genre,
+    thumbnailUrl: v.thumb,
+    imageUrl: v.cover_image,
+    discColor: v.formats?.length && v.formats[0].text ? v.formats[0].text : 'Black',
+  })));
+});
+
+const getAlbumDiscogs = async (discogsId) => {
+  if (!discogsId) return;
+
+  try {
+    const url = `https://api.discogs.com/releases/${discogsId}`;
+    const result = await fetch(url);
+    const data = await result.json();
+
+    return {
+      album: data.title,
+      artist: data.artists[0].name,
+      genres: data.genres,
+      imageUrl: data.images[0].uri,
+      published: data.year,
+      discColor: data.formats?.length && data.formats[0].text ? data.formats[0].text : 'Black',
+      tracks: data.tracklist.map(t => ({ position: t.position, title: t.title })),
+    }
+  } catch (e) {
+    console.log(e.message);
+  }
+}
+
+router.get('/album/discogs/:id', async (req, res) => {
+  const { id } = req.params;
+  const data = await getAlbumDiscogs(id);
+  res.status(200).send(data);
+});
+
+/* Vinyl Tracker APIs */
+
 router.get('/', async (req, res, next) => {
   try {
-    const vinyls = await getItems('Vinyls')
-    res.status(200).send(vinyls.map(vinylMap));
+    const vinyls = await datastore.query('Vinyl');
+    res.status(200).send(vinyls);
   } catch (err) {
     next(err);
   }
@@ -112,40 +122,34 @@ router.post('/', jsonParser, async (req, res, next) => {
   const {
     album,
     artist,
+    discogsId,
     nSides,
     discColor,
   } = req.body || {};
 
-  if (!album) return res.status(400).send('Album name is required');
-  if (!artist) return res.status(400).send('Artist name is required');
+  if (!discogsId && (!album || !artist)) {
+    return res.status(400).send('Either discogs ID or album and artist names required');
+  }
 
-  const data = await getAlbum(artist, album) || {};
-  let columns = 'album,artist,image_url,thumbnail_url';
-  const values = [album, artist, data.imageUrl, data.thumbnailUrl];
-  if (data.tags?.length > 0) {
-    columns += ',tags'
-    values.push(JSON.stringify(data.tags));
+  const discogsData = await getAlbumDiscogs(discogsId);
+  if (discogsId && !discogsData) {
+    return res.status(400).send('Invalid Discogs ID');
   }
-  if (data.tracks?.length > 0) {
-    columns += ',tracks'
-    values.push(JSON.stringify(data.tracks));
-  }
-  if (data.published) {
-    columns += ',published'
-    values.push(data.published);
-  }
-  if (discColor) {
-    columns += ',disc_color'
-    values.push(discColor);
-  }
-  if (nSides) {
-    columns += ',n_sides'
-    values.push(nSides);
-  }
+
+  const data = {
+    album: album || discogsData.album,
+    artist: artist || discogsData.artist,
+    nSides,
+    discColor: discColor || discogsData.discColor,
+    genres: discogsData.genres,
+    tracks: discogsData.tracks,
+    imageUrl: discogsData.imageUrl,
+    published: discogsData.published,
+  };
 
   try {
-    const result = await insertItem('Vinyls', columns, values);
-    res.status(201).send({ id: result.insertId, ...data });
+    const id = await datastore.save('Vinyl', data);
+    res.status(201).send({ id, ...data });
   } catch (err) {
     next(err);
   }
@@ -153,23 +157,22 @@ router.post('/', jsonParser, async (req, res, next) => {
 
 router.get('/history', async (req, res, next) => {
   try {
-    const query = `
-      SELECT VinylPlays.id, Vinyls.album, Vinyls.artist, Vinyls.image_url, Vinyls.thumbnail_url, VinylPlays.side, VinylPlays.vinyl, VinylPlays.timestamp
-      FROM VinylPlays INNER JOIN Vinyls
-      ON VinylPlays.vinyl = Vinyls.id
-      ORDER BY VinylPlays.timestamp DESC
-    `
-    const result = await executeQuery(query);
-    res.status(200).send(result.map(p => ({
-      playId: p.id,
-      vinylId: p.vinyl,
-      album: p.album,
-      artist: p.artist,
-      imageUrl: p.image_url,
-      thumbnailUrl: p.thumbnail_url,
-      side: p.side,
-      timestamp: p.timestamp,
-    })));
+    const history = await datastore.query('VinylPlay');
+
+    const vinylIds = history.map(p => p.vinylId);
+    const vinyls = await datastore.get_multiple('Vinyl', vinylIds);
+    history.forEach((v, i) => {
+      history[i] = {
+        ...history[i],
+        playId: history[i].id,
+        album: vinyls[i].album,
+        artist: vinyls[i].artist,
+        imageUrl: vinyls[i].imageUrl,
+      }
+      delete history[i].id
+    })
+
+    res.status(200).send(history);
   } catch (err) {
     next(err);
   }
@@ -178,12 +181,12 @@ router.get('/history', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   const { id } = req.params;
   try {
-    const vinyl = await getItemsById('Vinyls', id);
+    const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
 
-    res.status(200).send(vinylMap(vinyl));
+    res.status(200).send(vinyl);
   } catch (err) {
     next(err);
   }
@@ -198,37 +201,21 @@ router.put('/:id', jsonParser, async (req, res, next) => {
   } = req.body || {};
 
   try {
-    const vinyl = await getItemsById('Vinyls', id);
+    const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
-    
-    let query = 'UPDATE Vinyls SET '
-    const values = [];
-    if (published) {
-      query += 'published = ?, '
-      values.push(published);
-      vinyl.published = published;
-    }
-    if (nSides) {
-      query += 'n_sides = ?, '
-      values.push(nSides);
-      vinyl.n_sides = nSides;
-    }
-    if (discColor) {
-      query += 'disc_color = ?, '
-      values.push(discColor);
-      vinyl.disc_color = discColor;
-    }
-    if (values.length == 0) {
-      return res.status(400).send('No data to update');
-    }
-    query = query.slice(0, query.length - 2);
-    query += ' WHERE id = ?'
-    values.push(id);
-    await executeQuery(query, values);
 
-    res.status(200).send(vinylMap(vinyl));
+    const updatedVinyl = {
+      ...vinyl,
+      published: published || vinyl.published,
+      nSides: nSides || vinyl.nSides,
+      discColor: discColor || vinyl.discColor,
+      updatedAt: new Date(),
+    };
+    await datastore.update('Vinyl', id, updatedVinyl);
+
+    res.status(200).send(updatedVinyl);
   } catch (err) {
     next(err);
   }
@@ -237,13 +224,12 @@ router.put('/:id', jsonParser, async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
   const { id } = req.params;
   try {
-    const vinyl = await getItemsById('Vinyls', id);
+    const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
 
-    await removeItems('VinylPlays', `vinyl = ${id}`)
-    await removeItem('Vinyls', id)
+    await datastore.del('Vinyl', id);
     res.status(204).send();
   } catch (err) {
     next(err);
@@ -253,18 +239,21 @@ router.delete('/:id', async (req, res, next) => {
 router.get('/:id/plays', jsonParser, async (req, res, next) => {
   const { id } = req.params;
   try {
-    const vinyl = await getItemsById('Vinyls', id);
+    const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
 
-    const result = await getItems('VinylPlays', 'vinyl = ? ORDER BY timestamp DESC', [id]);
+    const result = await datastore.query('VinylPlay', {
+      property: 'vinylId', operator: '=', value: id,
+    });
+
     res.status(200).send({
       album: vinyl.album,
       artist: vinyl.artist,
       plays: result.map(p => ({
         playId: p.id,
-        side: p.side,
+        sides: p.sides,
         timestamp: p.timestamp,
       })),
     });
@@ -275,39 +264,30 @@ router.get('/:id/plays', jsonParser, async (req, res, next) => {
 
 router.post('/:id/plays', jsonParser, async (req, res, next) => {
   const { id } = req.params;
-  const {
-    side,
-    date,
-  } = req.body || {};
-  let timestamp = '';
+  const { sides, date } = req.body || {};
+
+  let timestamp = new Date();
   if (date) {
     try {
-      timestamp = new Date(date).toISOString().slice(0, 19).replace('T', ' ');
+      timestamp = new Date(date);
     } catch (e) {
       return res.status(400).send('Invalid Date String passed in');
     }
   }
+
   try {
-    const vinyl = await getItemsById('Vinyls', id);
+    const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
 
-    let columns = 'vinyl,side';
-    if (timestamp) {
-      columns += ',timestamp'
+    const data = {
+      vinylId: id,
+      sides,
+      timestamp,
     }
-    if (side) {
-      await insertItem('VinylPlays', columns, timestamp ? [id, side, timestamp] : [id, side]);
-    } else {
-      const sideParams = [];
-      for (let i = 0; i < vinyl.n_sides; i += 1) {
-        sideParams.push(timestamp ? [id, i + 1, timestamp] : [id, i + 1]);
-      }
-      await executeQuery(`INSERT INTO VinylPlays (${columns}) VALUES ?`, [sideParams]);
-    }
-
-    res.status(201).send();
+    const playId = await datastore.save('VinylPlay', data);
+    res.status(201).send({ playId, ...data });
   } catch (err) {
     next(err);
   }
@@ -316,7 +296,7 @@ router.post('/:id/plays', jsonParser, async (req, res, next) => {
 router.delete('/:id/plays/:playId', jsonParser, async (req, res, next) => {
   const { playId } = req.params;
   try {
-    await removeItem('VinylPlays', playId);
+    await datastore.del('VinylPlay', playId);
     res.status(204).send();
   } catch (err) {
     next(err);
@@ -324,5 +304,3 @@ router.delete('/:id/plays/:playId', jsonParser, async (req, res, next) => {
 });
 
 export default router;
-
-// initializeDatabase();
