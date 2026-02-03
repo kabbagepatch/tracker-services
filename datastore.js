@@ -29,6 +29,7 @@ export const query = async (keyName, filter, order) => {
 export const get = async (keyName, id) => {
   const key = datastore.key([keyName, datastore.int(id)]);
   const [result] = await datastore.get(key);
+  result.id = result[datastore.KEY].id;
 
   return result;
 }
@@ -36,6 +37,9 @@ export const get = async (keyName, id) => {
 export const get_multiple = async (keyName, ids) => {
   const keys = ids.map(id => datastore.key([keyName, datastore.int(id)]));
   const [result] = await datastore.get(keys);
+  result.forEach(r => {
+    r.id = r[datastore.KEY].id;
+  });
 
   return result;
 }

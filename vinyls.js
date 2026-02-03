@@ -33,11 +33,8 @@ const getAlbumLastFM = async (artist, album) => {
     return {
       album: data.album.name,
       artist: data.album.artist,
-      tags: data.album.tags ? data.album.tags.tag.map(t => t.name) : [],
       imageUrl: data.album.image[data.album.image.length - 1]['#text'],
       thumbnailUrl: data.album.image[1]['#text'],
-      published: data.album.wiki ? new Date(data.album.wiki.published).getFullYear() : undefined,
-      tracks: data.album.tracks && data.album.tracks.track ? data.album.tracks.track.map(t => t.name) : [],
     }
   } catch (e) {
     console.log(e.message);
@@ -76,6 +73,7 @@ router.get('/album/discogs/search', async (req, res, next) => {
     thumbnailUrl: v.thumb,
     imageUrl: v.cover_image,
     discColor: v.formats?.length && v.formats[0].text ? v.formats[0].text : 'Black',
+    barcode: v.barcode[0],
   })));
 });
 
@@ -86,6 +84,7 @@ const getAlbumDiscogs = async (discogsId) => {
     const url = `https://api.discogs.com/releases/${discogsId}`;
     const result = await fetch(url);
     const data = await result.json();
+    const tracks = data.tracklist.map(t => ({ position: t.position, title: t.title }));
 
     return {
       album: data.title,
@@ -93,8 +92,9 @@ const getAlbumDiscogs = async (discogsId) => {
       genres: data.genres,
       imageUrl: data.images[0].uri,
       published: data.year,
+      nSides: tracks[tracks.length - 1].position.charCodeAt(0) - 'A'.charCodeAt(0) + 1,
       discColor: data.formats?.length && data.formats[0].text ? data.formats[0].text : 'Black',
-      tracks: data.tracklist.map(t => ({ position: t.position, title: t.title })),
+      tracks,
     }
   } catch (e) {
     console.log(e.message);
@@ -135,15 +135,18 @@ router.post('/', jsonParser, async (req, res, next) => {
   if (discogsId && !discogsData) {
     return res.status(400).send('Invalid Discogs ID');
   }
+  const lastFMResults = await getAlbumLastFM(discogsData.artist, discogsData.album) || {};
 
   const data = {
     album: album || discogsData.album,
     artist: artist || discogsData.artist,
-    nSides,
+    nSides: nSides || discogsData.nSides,
     discColor: discColor || discogsData.discColor,
     genres: discogsData.genres,
     tracks: discogsData.tracks,
-    imageUrl: discogsData.imageUrl,
+    imageUrl: lastFMResults.imageUrl || discogsData.imageUrl,
+    albumImageUrl: lastFMResults.imageUrl,
+    vinylImageUrl: discogsData.imageUrl,
     published: discogsData.published,
   };
 
@@ -161,18 +164,25 @@ router.get('/history', async (req, res, next) => {
 
     const vinylIds = history.map(p => p.vinylId);
     const vinyls = await datastore.get_multiple('Vinyl', vinylIds);
-    history.forEach((v, i) => {
-      history[i] = {
-        ...history[i],
-        playId: history[i].id,
-        album: vinyls[i].album,
-        artist: vinyls[i].artist,
-        imageUrl: vinyls[i].imageUrl,
+    const vinylMap = {}
+    vinyls.forEach(v => {
+      vinylMap[v.id] = v;
+    });
+    const result = history.filter(play => !!vinylMap[play.vinylId]).map((play) => {
+      const fullHistory = {
+        ...play,
+        playId: play.id,
+        album: vinylMap[play.vinylId].album,
+        artist: vinylMap[play.vinylId].artist,
+        imageUrl: vinylMap[play.vinylId].imageUrl,
+        nSides: vinylMap[play.vinylId].nSides,
       }
-      delete history[i].id
+      delete fullHistory.id;
+      return fullHistory;
     })
+    result.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    res.status(200).send(history);
+    res.status(200).send(result);
   } catch (err) {
     next(err);
   }
@@ -195,6 +205,8 @@ router.get('/:id', async (req, res, next) => {
 router.put('/:id', jsonParser, async (req, res, next) => {
   const { id } = req.params;
   const {
+    album,
+    artist,
     published,
     nSides,
     discColor,
@@ -208,6 +220,8 @@ router.put('/:id', jsonParser, async (req, res, next) => {
 
     const updatedVinyl = {
       ...vinyl,
+      album: album || vinyl.album,
+      artist: artist || vinyl.artist,
       published: published || vinyl.published,
       nSides: nSides || vinyl.nSides,
       discColor: discColor || vinyl.discColor,
@@ -227,6 +241,13 @@ router.delete('/:id', async (req, res, next) => {
     const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
+    }
+
+    const result = await datastore.query('VinylPlay', {
+      property: 'vinylId', operator: '=', value: id,
+    });
+    if (result.length > 0) {
+      return res.status(400).send(`Cannot delete vinyl ${vinyl.album} from catalog. Vinyl has plays recorded`);
     }
 
     await datastore.del('Vinyl', id);
