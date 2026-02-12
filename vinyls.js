@@ -5,7 +5,7 @@ import bodyParser from 'body-parser';
 const jsonParser = bodyParser.json();
 
 import * as datastore from './datastore.js';
-import { getAlbumDiscogs, getAlbumLastFM } from './music.js';
+import { getReleaseDiscogs, getAlbumDiscogs } from './music.js';
 
 router.get('/', async (req, res, next) => {
   const { uid } = req.user;
@@ -32,24 +32,26 @@ router.post('/', jsonParser, async (req, res, next) => {
     return res.status(400).send('Either discogs ID or album and artist names required');
   }
 
-  const discogsData = await getAlbumDiscogs(discogsId);
-  if (discogsId && !discogsData) {
+  const discogsReleaseData = await getReleaseDiscogs(discogsId);
+  if (discogsId && !discogsReleaseData) {
     return res.status(400).send('Invalid Discogs ID');
   }
-  const lastFMResults = await getAlbumLastFM(discogsData.artist, discogsData.album) || {};
+  const discogsMastersData = await getAlbumDiscogs(discogsReleaseData.masterId);
 
   const data = {
     userId: uid,
-    album: album || discogsData.album,
-    artist: artist || discogsData.artist,
-    nSides: nSides || discogsData.nSides,
-    discColor: discColor || discogsData.discColor,
-    genres: discogsData.genres,
-    tracks: discogsData.tracks,
-    imageUrl: lastFMResults.imageUrl || discogsData.imageUrl,
-    albumImageUrl: lastFMResults.imageUrl,
-    vinylImageUrl: discogsData.imageUrl,
-    published: discogsData.published,
+    discogsReleaseId: discogsReleaseData.id,
+    discogsMastersId: discogsReleaseData.masterId,
+    album: album || discogsReleaseData.album,
+    artist: artist || discogsReleaseData.artist,
+    nSides: nSides || discogsReleaseData.nSides,
+    discColor: discColor || discogsReleaseData.discColor,
+    genres: discogsMastersData.genres.concat(discogsMastersData.styles),
+    tracks: discogsReleaseData.tracks,
+    imageUrl: discogsMastersData.imageUrl || discogsReleaseData.imageUrl,
+    albumImageUrl: discogsMastersData.imageUrl,
+    vinylImageUrl: discogsReleaseData.imageUrl,
+    published: discogsMastersData.published,
   };
 
   try {
@@ -236,7 +238,14 @@ router.post('/:id/plays', jsonParser, async (req, res, next) => {
       timestamp,
     }
     const playId = await datastore.save('VinylPlay', data);
-    res.status(201).send({ playId, ...data });
+    res.status(201).send({
+      playId,
+      ...data,
+      album: vinyl.album,
+      artist: vinyl.artist,
+      imageUrl: vinyl.imageUrl,
+      nSides: vinyl.nSides,
+    });
   } catch (err) {
     next(err);
   }

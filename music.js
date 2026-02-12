@@ -60,6 +60,7 @@ router.get('/discogs/search', async (req, res, next) => {
 
   res.status(200).send(data.results.map(v => ({
     discogsId: v.id,
+    masterId: v.master_id,
     title: v.title,
     published: v.year,
     genres: v.genre,
@@ -70,7 +71,7 @@ router.get('/discogs/search', async (req, res, next) => {
   })));
 });
 
-export const getAlbumDiscogs = async (discogsId) => {
+export const getReleaseDiscogs = async (discogsId) => {
   if (!discogsId) return;
 
   try {
@@ -80,7 +81,9 @@ export const getAlbumDiscogs = async (discogsId) => {
     const tracks = data.tracklist.map(t => ({ position: t.position, title: t.title }));
 
     return {
+      discogsId,
       album: data.title,
+      masterId: data.master_id,
       artist: data.artists[0].name,
       genres: data.genres,
       imageUrl: data.images[0].uri,
@@ -94,7 +97,34 @@ export const getAlbumDiscogs = async (discogsId) => {
   }
 }
 
-router.get('/discogs/:id', async (req, res) => {
+router.get('/discogs/release/:id', async (req, res) => {
+  const { id } = req.params;
+  const data = await getReleaseDiscogs(id);
+  res.status(200).send(data);
+});
+
+export const getAlbumDiscogs = async (masterId) => {
+  if (!masterId) return;
+
+  try {
+    const url = `https://api.discogs.com/masters/${masterId}`;
+    const result = await fetch(url);
+    const data = await result.json();
+
+    return {
+      album: data.title,
+      artist: data.artists[0].name,
+      genres: data.genres,
+      styles: data.styles,
+      imageUrl: data.images[0].uri,
+      published: data.year,
+    }
+  } catch (e) {
+    console.log(e.message);
+  }
+}
+
+router.get('/discogs/album/:id', async (req, res) => {
   const { id } = req.params;
   const data = await getAlbumDiscogs(id);
   res.status(200).send(data);
