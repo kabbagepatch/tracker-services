@@ -4,23 +4,8 @@ import express from 'express';
 const router = express.Router();
 
 import { Datastore } from '@google-cloud/datastore';
+import authenticate from './authenticate.js';
 const datastore = new Datastore();
-
-const authenticate = async (req, res, next) => {
-  const idToken = req.headers.authorization && req.headers.authorization.split('Bearer ')[1];
-  if (!idToken) {
-    return res.status(401).send('Unauthorized');
-  }
-
-  try {
-    const decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
-    req.user = decodedToken;
-    next();
-  } catch (error) {
-    console.log(error);
-    return res.status(401).send('Unauthorized');
-  }
-};
 
 // Create
 router.post('/', authenticate, async (req, res, next) => {
@@ -68,7 +53,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // Get user by ID
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', authenticate, async (req, res, next) => {
   const { id } = req.params;
   try {
     const userKey = datastore.key(['User', id]);
@@ -79,25 +64,8 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-// Delete user by ID
-router.delete('/:id', async (req, res, next) => {  
-  const auth = firebaseAuth.getAuth();
-  await firebaseAuth.signInWithEmailAndPassword(auth, "kavishmunjal123@gmail.com", "#TestPass13")
-  await auth.currentUser.delete()
-
-  const { id } = req.params;
+router.get('/admin/token', authenticate, async (req, res, next) => {
   try {
-    const userKey = datastore.key(['User', datastore.int(id)]);
-    await datastore.delete(userKey);
-    res.status(204);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get('/admin/token', async (req, res, next) => {
-  try {
-    //habitsapi-426700-firebase-adminsdk-dol7n-5cd3b1e42e
     const auth = firebaseAuth.getAuth();
     const decodedToken = atob(req.headers.authorization.split('Basic ')[1]).split(':');
     await firebaseAuth.signInWithEmailAndPassword(auth, decodedToken[0], decodedToken[1])

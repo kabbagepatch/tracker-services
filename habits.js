@@ -58,9 +58,7 @@ router.get('/', async (req, res, next) => {
   const { uid } = req.user;
 
   try {
-    const habits = await datastore.query('Habit', {
-      property: 'userId', operator: '=', value: uid
-    });
+    const habits = await datastore.query('Habit', { property: 'userId', operator: '=', value: uid });
     const habitsObject = {};
     habits.forEach(habit => {
       const year = new Date().getFullYear();

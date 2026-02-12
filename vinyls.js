@@ -5,113 +5,13 @@ import bodyParser from 'body-parser';
 const jsonParser = bodyParser.json();
 
 import * as datastore from './datastore.js';
-
-/* External APIs */
-
-router.get('/album/lastfm/search', async (req, res, next) => {
-  const searchTerm = req.query.album;
-  if (!searchTerm) {
-    return res.status(400).send('Album search term required')
-  }
-  const url = `https://ws.audioscrobbler.com/2.0/?method=album.search&api_key=${process.env.LAST_FM_API_KEY}&album=${searchTerm}&format=json`;
-  const result = await fetch(url);
-  const data = await result.json();
-
-  res.status(200).send(data.results.albummatches.album.filter(a => !!a.mbid).map(a => ({
-    album: a.name,
-    artist: a.artist,
-    imageUrl: a.image[a.image.length - 1]['#text']
-  })));
-});
-
-const getAlbumLastFM = async (artist, album) => {
-  try {
-    const url = `https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=${process.env.LAST_FM_API_KEY}&artist=${artist}&album=${album}&format=json`;
-    const result = await fetch(url);
-    const data = await result.json();
-
-    return {
-      album: data.album.name,
-      artist: data.album.artist,
-      imageUrl: data.album.image[data.album.image.length - 1]['#text'],
-      thumbnailUrl: data.album.image[1]['#text'],
-    }
-  } catch (e) {
-    console.log(e.message);
-  }
-}
-
-router.get('/album/lastfm', async (req, res, next) => {
-  const album = req.query.album;
-  const artist = req.query.artist;
-  if (!album || !artist) {
-    return res.status(400).send('Album and Artist required')
-  }
-
-  const data = await getAlbumLastFM(artist, album);
-  res.status(200).send(data);
-});
-
-router.get('/album/discogs/search', async (req, res, next) => {
-  const searchTerm = req.query.album;
-  if (!searchTerm) {
-    return res.status(400).send('Album search term required')
-  }
-  const url = `https://api.discogs.com/database/search?q=${searchTerm}&type=release&format=Vinyl`;
-  const result = await fetch(url, {
-    headers: {
-      "Authorization": `Discogs key=${process.env.DISCOGS_KEY}, secret=${process.env.DISCOGS_SECRET}`
-    }
-  });
-  const data = await result.json();
-
-  res.status(200).send(data.results.map(v => ({
-    discogsId: v.id,
-    title: v.title,
-    published: v.year,
-    genres: v.genre,
-    thumbnailUrl: v.thumb,
-    imageUrl: v.cover_image,
-    discColor: v.formats?.length && v.formats[0].text ? v.formats[0].text : 'Black',
-    barcode: v.barcode[0],
-  })));
-});
-
-const getAlbumDiscogs = async (discogsId) => {
-  if (!discogsId) return;
-
-  try {
-    const url = `https://api.discogs.com/releases/${discogsId}`;
-    const result = await fetch(url);
-    const data = await result.json();
-    const tracks = data.tracklist.map(t => ({ position: t.position, title: t.title }));
-
-    return {
-      album: data.title,
-      artist: data.artists[0].name,
-      genres: data.genres,
-      imageUrl: data.images[0].uri,
-      published: data.year,
-      nSides: tracks[tracks.length - 1].position.charCodeAt(0) - 'A'.charCodeAt(0) + 1,
-      discColor: data.formats?.length && data.formats[0].text ? data.formats[0].text : 'Black',
-      tracks,
-    }
-  } catch (e) {
-    console.log(e.message);
-  }
-}
-
-router.get('/album/discogs/:id', async (req, res) => {
-  const { id } = req.params;
-  const data = await getAlbumDiscogs(id);
-  res.status(200).send(data);
-});
-
-/* Vinyl Tracker APIs */
+import { getAlbumDiscogs, getAlbumLastFM } from './music.js';
 
 router.get('/', async (req, res, next) => {
+  const { uid } = req.user;
+
   try {
-    const vinyls = await datastore.query('Vinyl');
+    const vinyls = await datastore.query('Vinyl', { property: 'userId', operator: '=', value: uid });
     res.status(200).send(vinyls);
   } catch (err) {
     next(err);
@@ -119,6 +19,7 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', jsonParser, async (req, res, next) => {
+  const { uid } = req.user;
   const {
     album,
     artist,
@@ -138,6 +39,7 @@ router.post('/', jsonParser, async (req, res, next) => {
   const lastFMResults = await getAlbumLastFM(discogsData.artist, discogsData.album) || {};
 
   const data = {
+    userId: uid,
     album: album || discogsData.album,
     artist: artist || discogsData.artist,
     nSides: nSides || discogsData.nSides,
@@ -159,11 +61,13 @@ router.post('/', jsonParser, async (req, res, next) => {
 });
 
 router.get('/history', async (req, res, next) => {
-  try {
-    const history = await datastore.query('VinylPlay');
+  const { uid } = req.user;
 
+  try {
+    const history = await datastore.query('VinylPlay', { property: 'userId', operator: '=', value: uid });
+    
     const vinylIds = history.map(p => p.vinylId);
-    const vinyls = await datastore.get_multiple('Vinyl', vinylIds);
+    const vinyls = await datastore.getMultiple('Vinyl', vinylIds);
     const vinylMap = {}
     vinyls.forEach(v => {
       vinylMap[v.id] = v;
@@ -190,10 +94,15 @@ router.get('/history', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   const { id } = req.params;
+  const { uid } = req.user;
+
   try {
     const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
+    }
+    if (vinyl.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this vinyl');
     }
 
     res.status(200).send(vinyl);
@@ -204,6 +113,7 @@ router.get('/:id', async (req, res, next) => {
 
 router.put('/:id', jsonParser, async (req, res, next) => {
   const { id } = req.params;
+  const { uid } = req.user;
   const {
     album,
     artist,
@@ -216,6 +126,9 @@ router.put('/:id', jsonParser, async (req, res, next) => {
     const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
+    }
+    if (vinyl.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this vinyl');
     }
 
     const updatedVinyl = {
@@ -237,10 +150,15 @@ router.put('/:id', jsonParser, async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   const { id } = req.params;
+  const { uid } = req.user;
+
   try {
     const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
+    }
+    if (vinyl.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this vinyl');
     }
 
     const result = await datastore.query('VinylPlay', {
@@ -259,10 +177,15 @@ router.delete('/:id', async (req, res, next) => {
 
 router.get('/:id/plays', jsonParser, async (req, res, next) => {
   const { id } = req.params;
+  const { uid } = req.user;
+
   try {
     const vinyl = await datastore.get('Vinyl', id);
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
+    }
+    if (vinyl.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this vinyl');
     }
 
     const result = await datastore.query('VinylPlay', {
@@ -285,6 +208,7 @@ router.get('/:id/plays', jsonParser, async (req, res, next) => {
 
 router.post('/:id/plays', jsonParser, async (req, res, next) => {
   const { id } = req.params;
+  const { uid } = req.user;
   const { sides, date } = req.body || {};
 
   let timestamp = new Date();
@@ -301,8 +225,12 @@ router.post('/:id/plays', jsonParser, async (req, res, next) => {
     if (!vinyl) {
       return res.status(404).send(`Vinyl ${id} not found`);
     }
+    if (vinyl.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this vinyl');
+    }
 
     const data = {
+      userId: uid,
       vinylId: id,
       sides,
       timestamp,
@@ -315,8 +243,26 @@ router.post('/:id/plays', jsonParser, async (req, res, next) => {
 });
 
 router.delete('/:id/plays/:playId', jsonParser, async (req, res, next) => {
-  const { playId } = req.params;
+  const { id, playId } = req.params;
+  const { uid } = req.user;
+
   try {
+    const vinyl = await datastore.get('Vinyl', id);
+    if (!vinyl) {
+      return res.status(404).send(`Vinyl ${id} not found`);
+    }
+    if (vinyl.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this vinyl');
+    }
+
+    const play = await datastore.get('VinylPlay', playId);
+    if (play.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this vinyl');
+    }
+    if (play.vinylId !== id) {
+      return res.status(400).send('Vinyl Id does not match Vinyl Play');
+    }
+
     await datastore.del('VinylPlay', playId);
     res.status(204).send();
   } catch (err) {

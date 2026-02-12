@@ -34,7 +34,7 @@ export const get = async (keyName, id) => {
   return result;
 }
 
-export const get_multiple = async (keyName, ids) => {
+export const getMultiple = async (keyName, ids) => {
   const keys = ids.map(id => datastore.key([keyName, datastore.int(id)]));
   const [result] = await datastore.get(keys);
   result.forEach(r => {
@@ -46,6 +46,7 @@ export const get_multiple = async (keyName, ids) => {
 
 export const update = async (keyName, id, data) => {
   const key = datastore.key([keyName, datastore.int(id)]);
+  delete data.id;
   await datastore.save({ key, data });
 
   return key.id;

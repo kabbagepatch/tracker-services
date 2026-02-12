@@ -3,7 +3,6 @@ import { readFileSync } from 'fs';
 
 import * as firebase from 'firebase/app';
 import firebaseAdmin from 'firebase-admin';
-import * as firebaseAuth from 'firebase/auth';
 
 import express from 'express';
 import cors from 'cors';
@@ -30,20 +29,15 @@ import http from 'http';
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+import authenticate from './authenticate.js';
 import userRoutes from './users.js';
 import habitRoutes from './habits.js';
 import { router as weekendRoutes, sendNotifications, updateItem, getItems, resetItems } from './weekends.js';
 import vinylRoutes from './vinyls.js';
+import musicRoutes from './music.js';
 
-const firebaseConfig = {
-  apiKey: process.env.API_KEY,
-  authDomain: 'habitsapi-426700.firebaseapp.com',
-  projectId: 'habitsapi-426700',
-  storageBucket: 'habitsapi-426700.appspot.com',
-  messagingSenderId: '472591136365',
-  appId: '1:472591136365:web:6129ffd560b9c66e7cf164',
-  measurementId: 'G-TF2VLVQTLR'
-};
+import firebaseConfig from './firebaseConf.json' with { type: 'json' };
+firebaseConfig.apiKey = process.env.API_KEY;
 
 firebase.initializeApp(firebaseConfig);
 let serviceAccount;
@@ -58,35 +52,6 @@ firebaseAdmin.initializeApp({
   credential: firebaseAdmin.credential.cert(serviceAccount)
 });
 
-const authenticate = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).send('Unauthorized');
-  }
-
-  try {
-    let idToken;
-    if (authHeader.includes('Basic ')) {
-      const auth = firebaseAuth.getAuth();
-      const decodedToken = atob(authHeader.split('Basic ')[1]).split(':');
-      await firebaseAuth.signInWithEmailAndPassword(auth, decodedToken[0], decodedToken[1])
-      req.user = auth.currentUser;
-      // await firebaseAdmin.auth().setCustomUserClaims(req.user.uid, { admin: true })
-      next();
-    } else if (authHeader.includes('Bearer ')) {
-      const auth = firebaseAdmin.auth();
-      idToken = authHeader.split('Bearer ')[1];
-      req.user = await auth.verifyIdToken(idToken);
-      next();
-    } else {
-      throw Error('No authorization found');
-    }
-  } catch (error) {
-    console.log(error);
-    return res.status(401).send('Unauthorized');
-  }
-};
-
 app.options('*', cors());
 
 app.get('/', (req, res) => {
@@ -95,7 +60,8 @@ app.get('/', (req, res) => {
 
 app.use('/users', userRoutes);
 app.use('/habits', authenticate, habitRoutes);
-app.use('/vinyls', vinylRoutes);
+app.use('/vinyls', authenticate, vinylRoutes);
+app.use('/music', authenticate, musicRoutes);
 app.use('/weekend-tasks', weekendRoutes);
 
 wss.on('connection', async (ws) => {
