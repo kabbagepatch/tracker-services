@@ -1,6 +1,32 @@
 import express from 'express';
 const router = express.Router();
 
+import { extractColors } from 'extract-colors';
+import getPixels from 'get-pixels';
+
+export const getPixelsAsync = (imageUrl) => {
+  return new Promise((resolve, reject) => {
+    getPixels(imageUrl, (err, pixels) => {
+      if (err) {
+        reject(err)
+      } else {
+        resolve(pixels)
+      }
+    })
+  });
+};
+
+export const extractColorsAsync = async (imageUrl) => {
+  const pixels = await getPixelsAsync(imageUrl);
+  const data = [...pixels.data];
+  const [width, height] = pixels.shape;
+  let colors = await extractColors({ data, width, height });
+  colors = colors.sort((a, b) => a.area > b.area ? -1 : 1).filter(c => c.lightness > 0.35).map(c => c.hex)
+  // colors = colors.map(c => c.hex);
+
+  return colors;
+}
+
 router.get('/lastfm/search', async (req, res, next) => {
   const searchTerm = req.query.album;
   if (!searchTerm) {
@@ -79,6 +105,7 @@ export const getReleaseDiscogs = async (discogsId) => {
     const result = await fetch(url);
     const data = await result.json();
     const tracks = data.tracklist.map(t => ({ position: t.position, title: t.title }));
+    const albumColors = await extractColorsAsync(data.images[0].uri);
 
     return {
       discogsId,
@@ -90,7 +117,9 @@ export const getReleaseDiscogs = async (discogsId) => {
       published: data.year,
       nSides: tracks[tracks.length - 1].position.charCodeAt(0) - 'A'.charCodeAt(0) + 1,
       discColor: data.formats?.length && data.formats[0].text ? data.formats[0].text : 'Black',
+      barcode: data.identifiers ? data.identifiers[0].value : undefined,
       tracks,
+      albumColors,
     }
   } catch (e) {
     console.log(e.message);

@@ -5,7 +5,27 @@ import bodyParser from 'body-parser';
 const jsonParser = bodyParser.json();
 
 import * as datastore from './datastore.js';
-import { getReleaseDiscogs, getAlbumDiscogs } from './music.js';
+import { getReleaseDiscogs, getAlbumDiscogs, getPixelsAsync, extractColorsAsync } from './music.js';
+
+const validateOwnership = async (req, res, next) => {
+  const { id } = req.params;
+  const { uid } = req.user;
+
+  try {
+    const vinyl = await datastore.get('Vinyl', id);
+    if (!vinyl) {
+      return res.status(404).send(`Vinyl ${id} not found`);
+    }
+    if (vinyl.userId !== uid) {
+      return res.status(403).send('Forbidden: You do not have access to this vinyl');
+    }
+
+    req.vinyl = vinyl;
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
 
 router.get('/', async (req, res, next) => {
   const { uid } = req.user;
@@ -37,6 +57,7 @@ router.post('/', jsonParser, async (req, res, next) => {
     return res.status(400).send('Invalid Discogs ID');
   }
   const discogsMastersData = await getAlbumDiscogs(discogsReleaseData.masterId);
+  const albumColors = await extractColorsAsync(discogsMastersData.imageUrl || discogsReleaseData.imageUrl);
 
   const data = {
     userId: uid,
@@ -52,6 +73,8 @@ router.post('/', jsonParser, async (req, res, next) => {
     albumImageUrl: discogsMastersData.imageUrl,
     vinylImageUrl: discogsReleaseData.imageUrl,
     published: discogsMastersData.published,
+    favorite: false,
+    albumColors,
   };
 
   try {
@@ -82,6 +105,7 @@ router.get('/history', async (req, res, next) => {
         artist: vinylMap[play.vinylId].artist,
         imageUrl: vinylMap[play.vinylId].imageUrl,
         nSides: vinylMap[play.vinylId].nSides,
+        albumColors: vinylMap[play.vinylId].albumColors,
       }
       delete fullHistory.id;
       return fullHistory;
@@ -94,28 +118,16 @@ router.get('/history', async (req, res, next) => {
   }
 });
 
-router.get('/:id', async (req, res, next) => {
-  const { id } = req.params;
-  const { uid } = req.user;
-
+router.get('/:id', validateOwnership, async (req, res, next) => {
   try {
-    const vinyl = await datastore.get('Vinyl', id);
-    if (!vinyl) {
-      return res.status(404).send(`Vinyl ${id} not found`);
-    }
-    if (vinyl.userId !== uid) {
-      return res.status(403).send('Forbidden: You do not have access to this vinyl');
-    }
-
-    res.status(200).send(vinyl);
+    res.status(200).send(req.vinyl);
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/:id', jsonParser, async (req, res, next) => {
+router.put('/:id', jsonParser, validateOwnership, async (req, res, next) => {
   const { id } = req.params;
-  const { uid } = req.user;
   const {
     album,
     artist,
@@ -125,14 +137,7 @@ router.put('/:id', jsonParser, async (req, res, next) => {
   } = req.body || {};
 
   try {
-    const vinyl = await datastore.get('Vinyl', id);
-    if (!vinyl) {
-      return res.status(404).send(`Vinyl ${id} not found`);
-    }
-    if (vinyl.userId !== uid) {
-      return res.status(403).send('Forbidden: You do not have access to this vinyl');
-    }
-
+    const vinyl = req.vinyl;
     const updatedVinyl = {
       ...vinyl,
       album: album || vinyl.album,
@@ -143,26 +148,30 @@ router.put('/:id', jsonParser, async (req, res, next) => {
       updatedAt: new Date(),
     };
     await datastore.update('Vinyl', id, updatedVinyl);
-
     res.status(200).send(updatedVinyl);
   } catch (err) {
     next(err);
   }
 });
 
-router.delete('/:id', async (req, res, next) => {
+router.put('/:id/favorite', jsonParser, validateOwnership, async (req, res, next) => {
   const { id } = req.params;
-  const { uid } = req.user;
+  const { favorite } = req.body || {};
 
   try {
-    const vinyl = await datastore.get('Vinyl', id);
-    if (!vinyl) {
-      return res.status(404).send(`Vinyl ${id} not found`);
-    }
-    if (vinyl.userId !== uid) {
-      return res.status(403).send('Forbidden: You do not have access to this vinyl');
-    }
+    const updatedVinyl = { ...req.vinyl, favorite };
+    await datastore.update('Vinyl', id, updatedVinyl);
+    res.status(200).send(updatedVinyl);
+  } catch (err) {
+    next(err);
+  }
+});
 
+router.delete('/:id', validateOwnership, async (req, res, next) => {
+  const { id } = req.params;
+
+  try {
+    const vinyl = req.vinyl;
     const result = await datastore.query('VinylPlay', {
       property: 'vinylId', operator: '=', value: id,
     });
@@ -177,19 +186,11 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
-router.get('/:id/plays', jsonParser, async (req, res, next) => {
+router.get('/:id/plays', validateOwnership, async (req, res, next) => {
   const { id } = req.params;
-  const { uid } = req.user;
 
   try {
-    const vinyl = await datastore.get('Vinyl', id);
-    if (!vinyl) {
-      return res.status(404).send(`Vinyl ${id} not found`);
-    }
-    if (vinyl.userId !== uid) {
-      return res.status(403).send('Forbidden: You do not have access to this vinyl');
-    }
-
+    const vinyl = req.vinyl;
     const result = await datastore.query('VinylPlay', {
       property: 'vinylId', operator: '=', value: id,
     });
@@ -208,7 +209,7 @@ router.get('/:id/plays', jsonParser, async (req, res, next) => {
   }
 });
 
-router.post('/:id/plays', jsonParser, async (req, res, next) => {
+router.post('/:id/plays', jsonParser, validateOwnership, async (req, res, next) => {
   const { id } = req.params;
   const { uid } = req.user;
   const { sides, date } = req.body || {};
@@ -223,14 +224,7 @@ router.post('/:id/plays', jsonParser, async (req, res, next) => {
   }
 
   try {
-    const vinyl = await datastore.get('Vinyl', id);
-    if (!vinyl) {
-      return res.status(404).send(`Vinyl ${id} not found`);
-    }
-    if (vinyl.userId !== uid) {
-      return res.status(403).send('Forbidden: You do not have access to this vinyl');
-    }
-
+    const vinyl = req.vinyl;
     const data = {
       userId: uid,
       vinylId: id,
@@ -251,19 +245,11 @@ router.post('/:id/plays', jsonParser, async (req, res, next) => {
   }
 });
 
-router.delete('/:id/plays/:playId', jsonParser, async (req, res, next) => {
+router.delete('/:id/plays/:playId', validateOwnership, async (req, res, next) => {
   const { id, playId } = req.params;
   const { uid } = req.user;
 
   try {
-    const vinyl = await datastore.get('Vinyl', id);
-    if (!vinyl) {
-      return res.status(404).send(`Vinyl ${id} not found`);
-    }
-    if (vinyl.userId !== uid) {
-      return res.status(403).send('Forbidden: You do not have access to this vinyl');
-    }
-
     const play = await datastore.get('VinylPlay', playId);
     if (play.userId !== uid) {
       return res.status(403).send('Forbidden: You do not have access to this vinyl');
