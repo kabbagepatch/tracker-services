@@ -1,1 +1,3 @@
 fastapi[standard]~=0.0
+firebase-admin
+python-dotenv
