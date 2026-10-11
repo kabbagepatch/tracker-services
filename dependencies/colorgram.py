@@ -13,181 +13,181 @@ from PIL import Image
 
 import sys
 if sys.version_info[0] <= 2:
-  range = xrange
-  ARRAY_DATATYPE = b'l'
+    range = xrange
+    ARRAY_DATATYPE = b'l'
 else:
-  ARRAY_DATATYPE = 'l'
+    ARRAY_DATATYPE = 'l'
 
 Rgb = namedtuple('Rgb', ('r', 'g', 'b'))
 Hsl = namedtuple('Hsl', ('h', 's', 'l'))
 TraditionalHsl = namedtuple('TraditionalHsl', ('h', 's', 'l'))
 
 class Color(object):
-  def __init__(self, r, g, b, proportion):
-    self.rgb = Rgb(r, g, b)
-    self.proportion = proportion
-  
-  def __repr__(self):
-    return "<colorgram.py Color: {}, {}%>".format(
-      str(self.rgb), str(self.proportion * 100))
+    def __init__(self, r, g, b, proportion):
+        self.rgb = Rgb(r, g, b)
+        self.proportion = proportion
+    
+    def __repr__(self):
+        return "<colorgram.py Color: {}, {}%>".format(
+            str(self.rgb), str(self.proportion * 100))
 
-  @property
-  def hsl(self):
-    try:
-      return self._hsl
-    except AttributeError:
-      self._hsl = Hsl(*hsl(*self.rgb))
-      return self._hsl
+    @property
+    def hsl(self):
+        try:
+            return self._hsl
+        except AttributeError:
+            self._hsl = Hsl(*hsl(*self.rgb))
+            return self._hsl
 
-  @property
-  def hex(self):
-    try:
-      return self._hex
-    except AttributeError:
-      self._hex = get_hex(*self.rgb)
-      return self._hex
+    @property
+    def hex(self):
+        try:
+            return self._hex
+        except AttributeError:
+            self._hex = get_hex(*self.rgb)
+            return self._hex
 
 def get_top_colors(image_url):
-  local_filename = "downloaded_image.png"
-  try:
-    opener = urllib.request.build_opener()
-    opener.addheaders = [('User-Agent', 'MyApp/1.0')]
-    urllib.request.install_opener(opener)
-    urllib.request.urlretrieve(image_url, local_filename)
-    colors = extract(local_filename, 10)
-    return list(map(lambda c: c.hex, colors))
-  except Exception as e:
-    print("Error opening image", e)
-  finally:
-    if os.path.exists(local_filename):
-      os.remove(local_filename)
+    local_filename = "downloaded_image.png"
+    try:
+        opener = urllib.request.build_opener()
+        opener.addheaders = [('User-Agent', 'MyApp/1.0')]
+        urllib.request.install_opener(opener)
+        urllib.request.urlretrieve(image_url, local_filename)
+        colors = extract(local_filename, 10)
+        return list(map(lambda c: c.hex, colors))
+    except Exception as e:
+        print("Error opening image", e)
+    finally:
+        if os.path.exists(local_filename):
+            os.remove(local_filename)
 
 def extract(f, number_of_colors):
-  image = f if isinstance(f, Image.Image) else Image.open(f)
-  if image.mode not in ('RGB', 'RGBA', 'RGBa'):
-    image = image.convert('RGB')
-  
-  samples = sample(image)
-  used = pick_used(samples)
-  used.sort(key=lambda x: x[0], reverse=True)
-  return get_colors(samples, used, number_of_colors)
+    image = f if isinstance(f, Image.Image) else Image.open(f)
+    if image.mode not in ('RGB', 'RGBA', 'RGBa'):
+        image = image.convert('RGB')
+    
+    samples = sample(image)
+    used = pick_used(samples)
+    used.sort(key=lambda x: x[0], reverse=True)
+    return get_colors(samples, used, number_of_colors)
 
 def sample(image):
-  top_two_bits = 0b11000000
+    top_two_bits = 0b11000000
 
-  sides = 1 << 2 # Left by the number of bits used.
-  cubes = sides ** 7
+    sides = 1 << 2 # Left by the number of bits used.
+    cubes = sides ** 7
 
-  samples = array.array(ARRAY_DATATYPE, (0 for _ in range(cubes)))
-  width, height = image.size
-  
-  pixels = image.load()
-  for y in range(height):
-    for x in range(width):
-      # Pack the top two bits of all 6 values into 12 bits.
-      # 0bYYhhllrrggbb - luminance, hue, luminosity, red, green, blue.
+    samples = array.array(ARRAY_DATATYPE, (0 for _ in range(cubes)))
+    width, height = image.size
+    
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            # Pack the top two bits of all 6 values into 12 bits.
+            # 0bYYhhllrrggbb - luminance, hue, luminosity, red, green, blue.
 
-      r, g, b = pixels[x, y][:3]
-      h, s, l = hsl(r, g, b) #this is still using the original HSL in case it's necessry for proper function
-      # Standard constants for converting RGB to relative luminance.
-      Y = int(r * 0.2126 + g * 0.7152 + b * 0.0722)
+            r, g, b = pixels[x, y][:3]
+            h, s, l = hsl(r, g, b) #this is still using the original HSL in case it's necessry for proper function
+            # Standard constants for converting RGB to relative luminance.
+            Y = int(r * 0.2126 + g * 0.7152 + b * 0.0722)
 
-      # Everything's shifted into place from the top two
-      # bits' original position - that is, bits 7-8.
-      packed  = (Y & top_two_bits) << 4
-      packed |= (h & top_two_bits) << 2
-      packed |= (l & top_two_bits) << 0
+            # Everything's shifted into place from the top two
+            # bits' original position - that is, bits 7-8.
+            packed    = (Y & top_two_bits) << 4
+            packed |= (h & top_two_bits) << 2
+            packed |= (l & top_two_bits) << 0
 
-      # Due to a bug in the original colorgram.js, RGB isn't included.
-      # The original author tries using negative bit shifts, while in
-      # fact JavaScript has the stupidest possible behavior for those.
-      # By uncommenting these lines, "intended" behavior can be
-      # restored, but in order to keep result compatibility with the
-      # original the "error" exists here too. Add back in if it is
-      # ever fixed in colorgram.js.
+            # Due to a bug in the original colorgram.js, RGB isn't included.
+            # The original author tries using negative bit shifts, while in
+            # fact JavaScript has the stupidest possible behavior for those.
+            # By uncommenting these lines, "intended" behavior can be
+            # restored, but in order to keep result compatibility with the
+            # original the "error" exists here too. Add back in if it is
+            # ever fixed in colorgram.js.
 
-      # packed |= (r & top_two_bits) >> 2
-      # packed |= (g & top_two_bits) >> 4
-      # packed |= (b & top_two_bits) >> 6
-      # print "Pixel #{}".format(str(y * width + x))
-      # print "h: {}, s: {}, l: {}".format(str(h), str(s), str(l))
-      # print "R: {}, G: {}, B: {}".format(str(r), str(g), str(b))
-      # print "Y: {}".format(str(Y))
-      # print "Packed: {}, binary: {}".format(str(packed), bin(packed)[2:])
-      # print
-      packed *= 4
-      samples[packed]   += r
-      samples[packed + 1] += g
-      samples[packed + 2] += b
-      samples[packed + 3] += 1
-  return samples
+            # packed |= (r & top_two_bits) >> 2
+            # packed |= (g & top_two_bits) >> 4
+            # packed |= (b & top_two_bits) >> 6
+            # print "Pixel #{}".format(str(y * width + x))
+            # print "h: {}, s: {}, l: {}".format(str(h), str(s), str(l))
+            # print "R: {}, G: {}, B: {}".format(str(r), str(g), str(b))
+            # print "Y: {}".format(str(Y))
+            # print "Packed: {}, binary: {}".format(str(packed), bin(packed)[2:])
+            # print
+            packed *= 4
+            samples[packed]     += r
+            samples[packed + 1] += g
+            samples[packed + 2] += b
+            samples[packed + 3] += 1
+    return samples
 
 def pick_used(samples):
-  used = []
-  for i in range(0, len(samples), 4):
-    count = samples[i + 3]
-    if count:
-      used.append((count, i))
-  return used
+    used = []
+    for i in range(0, len(samples), 4):
+        count = samples[i + 3]
+        if count:
+            used.append((count, i))
+    return used
 
 def get_colors(samples, used, number_of_colors):
-  pixels = 0
-  colors = []
-  number_of_colors = min(number_of_colors, len(used))
+    pixels = 0
+    colors = []
+    number_of_colors = min(number_of_colors, len(used))
 
-  for count, index in used[:number_of_colors]:
-    pixels += count
+    for count, index in used[:number_of_colors]:
+        pixels += count
 
-    color = Color(
-      samples[index] // count,
-      samples[index + 1] // count,
-      samples[index + 2] // count,
-      count
-    )
+        color = Color(
+            samples[index] // count,
+            samples[index + 1] // count,
+            samples[index + 2] // count,
+            count
+        )
 
-    colors.append(color)
-  for color in colors:
-    color.proportion /= pixels
-  return colors
+        colors.append(color)
+    for color in colors:
+        color.proportion /= pixels
+    return colors
 
 def get_hex(r, g, b):
-  return f"#{r:x}{g:x}{b:x}"
+    return f"#{r:x}{g:x}{b:x}"
 
 def hsl(hex_r, hex_g, hex_b):
-  r = hex_r / 255
-  g = hex_g / 255
-  b = hex_b / 255
-  if r > g:
-    if b > r:
-      most, least = b, g
-    elif b > g:
-      most, least = r, g
+    r = hex_r / 255
+    g = hex_g / 255
+    b = hex_b / 255
+    if r > g:
+        if b > r:
+            most, least = b, g
+        elif b > g:
+            most, least = r, g
+        else:
+            most, least = r, b
     else:
-      most, least = r, b
-  else:
-    if b > g:
-      most, least = b, r
-    elif b > r:
-      most, least = g, r
-    else:
-      most, least = g, b
-  
-  l = int((most + least) * 100 / 2)
-  
-  if most == least:
-    h = s = 0
-  else:
-    diff = most - least
-    if l > 0.5:
-      s = int(diff * 100 / (2 - most - least))
-    else:
-      s = int(diff * 100 / (most + least))
+        if b > g:
+            most, least = b, r
+        elif b > r:
+            most, least = g, r
+        else:
+            most, least = g, b
     
-    if most == r:
-      h = int(60 * (g - b) / diff + (6 if g < b else 0))
-    elif most == g:
-      h = int(60 * (b - r) / diff + 2)
+    l = int((most + least) * 100 / 2)
+    
+    if most == least:
+        h = s = 0
     else:
-      h = int(60 * (r - g) / diff + 4)
-  
-  return h, s, l
+        diff = most - least
+        if l > 0.5:
+            s = int(diff * 100 / (2 - most - least))
+        else:
+            s = int(diff * 100 / (most + least))
+        
+        if most == r:
+            h = int(60 * (g - b) / diff + (6 if g < b else 0))
+        elif most == g:
+            h = int(60 * (b - r) / diff + 2)
+        else:
+            h = int(60 * (r - g) / diff + 4)
+    
+    return h, s, l

@@ -16,4 +16,4 @@ app.include_router(vinyls_router)
 
 @app.get("/")
 async def root():
-  return {"message": "Welcome to Tracker Services"}
+    return {"message": "Welcome to Tracker Services"}
