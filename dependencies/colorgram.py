@@ -7,6 +7,7 @@ from __future__ import division
 
 import os
 import array
+import tempfile
 import urllib.request
 from collections import namedtuple
 from PIL import Image
@@ -52,10 +53,17 @@ def get_top_colors(image_url):
     try:
         opener = urllib.request.build_opener()
         opener.addheaders = [('User-Agent', 'MyApp/1.0')]
-        urllib.request.install_opener(opener)
-        urllib.request.urlretrieve(image_url, local_filename)
+
+        with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as tmp:
+            local_filename = tmp.name
+
+        with opener.open(image_url, timeout=15) as response:
+            with open(local_filename, "wb") as image_file:
+                image_file.write(response.read())
+
+        print(local_filename)
         colors = extract(local_filename, 10)
-        return list(map(lambda c: c.hex, colors))
+        return [color.hex for color in colors]
     except Exception as e:
         print("Error opening image", e)
     finally:

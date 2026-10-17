@@ -7,6 +7,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 
 from dependencies.colorgram import get_top_colors
 from dependencies.firebase_auth import FirebaseUserDep
+from dependencies.config import settings
 
 db = firestore.client()
 router = APIRouter(
@@ -27,23 +28,23 @@ class DiscogsAlbum(BaseModel):
     id: int | str = ''
     album: str
     artist: str
-    genres: list[str]
-    published: int
-    image_url: str
+    genres: list[str] = []
+    published: int = ''
+    image_url: str = ''
 
 class Common(BaseModel):
     album: str
     artist: str
-    genres: list[str]
-    published: int
-    image_url: str
-    tracks: list[Track]
+    genres: list[str] = []
+    published: int = ''
+    image_url: str = ''
+    tracks: list[Track] = []
     disc_color_text: str = ''
     n_sides: int
 
 class DiscogsRelease(Common):
     id: int | str
-    master_id: int | str
+    master_id: int | str = ''
     barcode: str = ''
 
 class VinylData(BaseModel):
@@ -61,6 +62,7 @@ class Vinyl(Common):
     album_image_url: str = ''
     favorite: bool = False
     album_colors: list[str] = []
+    deleted: bool = False
 
 class VinylPlayData(BaseModel):
     sides: list[int] = []
@@ -74,7 +76,8 @@ class VinylPlay(BaseModel):
 
 async def get_discogs_release(discogs_id):
     async with httpx.AsyncClient() as client:
-        discogs_response = await client.get(f'https://api.discogs.com/releases/{discogs_id}')
+        headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
+        discogs_response = await client.get(f'https://api.discogs.com/releases/{discogs_id}', headers=headers)
         try: discogs_response.raise_for_status()
         except: return
 
@@ -85,7 +88,7 @@ async def get_discogs_release(discogs_id):
 
         return DiscogsRelease(
             id=discogs_id,
-            master_id=data.get("master_id"),
+            master_id=data.get("master_id", ""),
             album=data.get("title"),
             artist=data["artists"][0].get("name"),
             genres=data.get("genres"),
@@ -101,7 +104,9 @@ async def get_discogs_album(master_id):
     if not master_id: return
 
     async with httpx.AsyncClient() as client:
-        discogs_response = await client.get(f'https://api.discogs.com/masters/{master_id}')
+        headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
+        discogs_response = await client.get(f'https://api.discogs.com/masters/{master_id}', headers=headers)
+        if discogs_response == None: return
         data = discogs_response.json()
 
         return DiscogsAlbum(
@@ -120,6 +125,33 @@ async def get_release(discogs_id, _: FirebaseUserDep):
 @router.get("/album/{master_id}")
 async def get_album(master_id, _: FirebaseUserDep):
     return await get_discogs_album(master_id)
+
+@router.get("/search")
+async def search_discogs_release(_: FirebaseUserDep, response: Response, term: str = ''):
+    if len(term) <= 2:
+        response.status_code = 400
+        return { "message": "Search term of at least length 3 is required" }
+
+    async with httpx.AsyncClient() as client:
+        headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
+        discogs_response = await client.get(
+            f'https://api.discogs.com/database/search?q={term}&type=release&format=Vinyl',
+            headers=headers
+        )
+        data = discogs_response.json()
+
+        return list(map(
+            lambda v: ({
+                "discogs_id": v.get("id"),
+                "master_id": v.get("master_id"),
+                "title": v.get("title"),
+                "published": v.get("year"),
+                "genres": v.get("genre"),
+                "image_url": v.get("cover_image"),
+                "disc_color_text": (v.get("formats") and len(v["formats"]) > 0 and v["formats"][0].get("text")) or "Black",
+                "barcode": v.get("barcode") and len(v["barcode"]) > 0 and v.get("barcode")[0],
+            }), data.get("results")
+        ))
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def add_vinyl(data: VinylData, user: FirebaseUserDep, response: Response):
@@ -140,12 +172,12 @@ async def add_vinyl(data: VinylData, user: FirebaseUserDep, response: Response):
         artist = discogs_release.artist,
         n_sides = discogs_release.n_sides,
         disc_color_text = discogs_release.disc_color_text,
-        published = discogs_release.published,
+        published = discogs_album and discogs_album.published or discogs_release.published,
         genres = discogs_release.genres,
         tracks = discogs_release.tracks,
-        image_url = discogs_album.image_url or discogs_release.image_url,
+        image_url = discogs_album and discogs_album.image_url or discogs_release.image_url,
         release_image_url = discogs_release.image_url,
-        album_image_url = discogs_album.image_url,
+        album_image_url = discogs_album and discogs_album.image_url,
         album_colors = get_top_colors(discogs_album.image_url or discogs_release.image_url)
     )
 
@@ -154,22 +186,24 @@ async def add_vinyl(data: VinylData, user: FirebaseUserDep, response: Response):
         **vinyl.model_dump(),
         "user_id": user["uid"],
         "created_at": firestore.SERVER_TIMESTAMP,
+        "deleted": False
     }
     doc_ref.create(vinyl_data)
     saved_vinyl = doc_ref.get().to_dict()
-    print(saved_vinyl)
 
-    return { "message": f'Vinyl {vinyl.album} added!', "data": saved_vinyl | { "id": doc_ref.id } }
+    return saved_vinyl | { "id": doc_ref.id }
 
 @router.get("/")
 def list_vinyls(user: FirebaseUserDep):
     docs = (
         db.collection(VINYLS)
         .where(filter=FieldFilter("user_id", "==", user["uid"]))
+        .where(filter=FieldFilter("deleted", "==", False))
         .stream()
     )
+    result = list(map(lambda doc: doc.to_dict() | { "id": doc.id }, docs))
 
-    return list(map(lambda doc: doc.to_dict() | { "id": doc.id }, docs))
+    return result
 
 
 @router.get("/activity")
@@ -213,10 +247,15 @@ def get_user_plays(user: FirebaseUserDep):
             "artist": vinyl["artist"],
             "n_sides": vinyl["n_sides"],
             "image_url": vinyl["image_url"],
+            "album_colors": vinyl["album_colors"],
+            "deleted": vinyl["deleted"],
             **play,
         })
+    def timestamp(r):
+        return r["timestamp"]
+    result.sort(key=timestamp, reverse=True)
 
-    return { "plays": result }
+    return result
 
 def get_owned_vinyl(user_id, vinyl_id):
     doc_ref = db.collection(VINYLS).document(vinyl_id)
@@ -227,6 +266,12 @@ def get_owned_vinyl(user_id, vinyl_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have access to this vinyl",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if vinyl["deleted"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This vinyl has been deleted",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
@@ -255,7 +300,7 @@ def update_vinyl(vinyl_id, data: VinylData, user: FirebaseUserDep):
 
     doc_ref.update(updates)
 
-    return vinyl | updates
+    return vinyl.model_dump() | updates
 
 class Favorite(BaseModel): favorite: bool
 @router.put("/{vinyl_id}/favorite")
@@ -263,12 +308,33 @@ def update_vinyl(vinyl_id, data: Favorite, user: FirebaseUserDep):
     vinyl, doc_ref = get_owned_vinyl(user["uid"], vinyl_id)
     doc_ref.update({ "favorite": data.favorite })
 
-    return vinyl | { "favorite": data.favorite }
+    return vinyl.model_dump() | { "favorite": data.favorite }
 
 @router.delete("/{vinyl_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_vinyl(vinyl_id, user: FirebaseUserDep):
     _, doc_ref = get_owned_vinyl(user["uid"], vinyl_id)
-    doc_ref.delete()
+    doc_ref.update({ "deleted": True })
+
+
+class VinylPlayBatch(BaseModel):
+    vinyl_id: str | int = ''
+    timestamp: str | int = ''
+    sides: list[str | int] = []
+from datetime import datetime
+@router.post("/batch", status_code=status.HTTP_201_CREATED)
+async def batch_add_vinyl(data: list[VinylPlayBatch]):
+    batch = db.batch()
+    for v in data:
+        doc_ref = db.collection(VINYL_PLAYS).document()
+        vinyl_play_data = {
+            "sides": v.sides,
+            "vinyl_id": v.vinyl_id,
+            "user_id": "jUQKR6CXY7TsTx7TqxeFhU66oh23",
+            "timestamp": datetime.fromisoformat(v.timestamp),
+        }
+
+        batch.create(doc_ref, vinyl_play_data)
+    batch.commit()
 
 @router.post("/{vinyl_id}/plays", status_code=status.HTTP_201_CREATED)
 def play_vinyl(vinyl_id, data: VinylPlayData, user: FirebaseUserDep):
@@ -285,15 +351,13 @@ def play_vinyl(vinyl_id, data: VinylPlayData, user: FirebaseUserDep):
     }
     doc_ref.create(play_data)
 
-    return {
-        "message": f'Vinyl play added!',
-        "data": doc_ref.get().to_dict() | {
-            "play_id": doc_ref.id,
-            "album": vinyl.album,
-            "artist": vinyl.artist,
-            "image_url": vinyl.image_url,
-            "n_sides": vinyl.n_sides,
-        }
+    return doc_ref.get().to_dict() | {
+        "play_id": doc_ref.id,
+        "album": vinyl.album,
+        "artist": vinyl.artist,
+        "image_url": vinyl.image_url,
+        "n_sides": vinyl.n_sides,
+        "album_colors": vinyl.album_colors
     }
 
 @router.get("/{vinyl_id}/plays")
