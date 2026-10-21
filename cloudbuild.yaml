@@ -5,23 +5,23 @@ steps:
     args:
       - -c
       - |
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends libatomic1
         pip install -q -r requirements.txt -r requirements-dev.txt
         ruff check .
         pyright
 
   - id: build
     name: gcr.io/cloud-builders/docker
-    args: [build, -t, $_IMAGE:$COMMIT_SHA, .]
+    args: [build, -t, $_AR_HOSTNAME/$PROJECT_ID/$_AR_REPOSITORY/$_SERVICE_NAME:$COMMIT_SHA, .]
 
   - id: push
     name: gcr.io/cloud-builders/docker
-    args: [push, $_IMAGE:$COMMIT_SHA]
+    args: [push, $_AR_HOSTNAME/$PROJECT_ID/$_AR_REPOSITORY/$_SERVICE_NAME:$COMMIT_SHA]
 
   - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
-    args: [run, deploy, tracker-services, --image, $_IMAGE:$COMMIT_SHA, --region, $_REGION]
+    args: [run, deploy, tracker-services, --image, $_AR_HOSTNAME/$PROJECT_ID/$_AR_REPOSITORY/$_SERVICE_NAME:$COMMIT_SHA, --region, $_DEPLOY_REGION]
 
-substitutions:
-  _REGION: us-central1
-  _IMAGE: us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/tracker-services
+options:
+  logging: CLOUD_LOGGING_ONLY
