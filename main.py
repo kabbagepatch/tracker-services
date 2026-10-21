@@ -1,36 +1,36 @@
-from dotenv import load_dotenv; load_dotenv()
-from firebase import init_firebase; init_firebase()
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.extension import _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
+from dependencies.config import settings
+from firebase import init_firebase
 from middleware.process_time import ProcessTimeMiddleware
 from routers.health import router as health_router
 from routers.users import router as users_router
 from routers.vinyls import router as vinyls_router
 
-from dependencies.config import settings
 
-origins = [
-    settings.frontend_url,
-]
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_firebase()
+    yield
 
-app = FastAPI(docs_url=None, redoc_url=None)
+app = FastAPI(lifespan=lifespan,docs_url=None, redoc_url=None)
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler) # pyright: ignore[reportArgumentType]
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[settings.frontend_url],
     allow_methods=["*"],
     allow_headers=["*"],
 )

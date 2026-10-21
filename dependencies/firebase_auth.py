@@ -1,7 +1,8 @@
 from typing import Annotated
-from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from firebase_admin.auth import verify_id_token, get_user
+
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from firebase_admin.auth import verify_id_token
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -11,7 +12,7 @@ def get_firebase_user_from_token(request: Request, token: Annotated[HTTPAuthoriz
         if not token:
             raise ValueError("No token")
         user = verify_id_token(token.credentials)
-    except Exception:
+    except Exception:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid/Missing credentials",

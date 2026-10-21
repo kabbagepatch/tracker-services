@@ -1,20 +1,25 @@
-import httpx
 from datetime import datetime
-from slowapi import Limiter
-from fastapi import APIRouter, status, Request, Response, HTTPException
+
+import httpx
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from firebase_admin import firestore
-from pydantic import BaseModel, Field
+from google.cloud.firestore import SERVER_TIMESTAMP
 from google.cloud.firestore_v1.base_query import FieldFilter
+from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from dependencies.colorgram import get_top_colors
-from dependencies.firebase_auth import FirebaseUserDep
 from dependencies.config import settings
+from dependencies.firebase_auth import FirebaseUserDep
 
-db = firestore.client()
 router = APIRouter(
     prefix="/vinyls",
     tags=["Vinyls"]
 )
+
+def db():
+    return firestore.client()
 
 VINYLS = "vinyls"
 VINYL_PLAYS = "vinyl_plays"
@@ -46,7 +51,7 @@ class Common(BaseModel):
 class DiscogsRelease(Common):
     id: int
     master_id: int | None = None
-    barcode: str = ''
+    barcode: str | None = None
 
 class VinylData(BaseModel):
     discogs_id: int | None = None
@@ -85,6 +90,8 @@ def get_discogs_release(discogs_id):
         data = discogs_response.json()
         disc_color_text = (data.get("formats") and len(data["formats"]) > 0 and data["formats"][0].get("text")) or "Black"
         barcode = data["identifiers"][0].get("value") if data.get("identifiers") else None
+        first = (data.get("tracklist") or [{}])[-1].get("position", "")[:1].upper()
+        n_sides = ord(first) - ord('A') + 1 if 'A' <= first <= 'Z' else 2
         return DiscogsRelease(
             id=discogs_id,
             master_id=data.get("master_id"),
@@ -93,7 +100,7 @@ def get_discogs_release(discogs_id):
             genres=data.get("genres", []),
             published=data.get("year"),
             image_url=(data.get("images") or [{}])[0].get("uri", ""),
-            n_sides=ord(data["tracklist"][-1]["position"][0]) - ord('A') + 1,
+            n_sides=n_sides,
             disc_color_text=disc_color_text,
             barcode=barcode,
             tracks=data["tracklist"]
@@ -119,7 +126,7 @@ def get_discogs_album(master_id):
         )
 
 def uid_key(request: Request):
-    return getattr(request.state, "uid", None)
+    return getattr(request.state, "uid", None) or get_remote_address(request)
 limiter = Limiter(key_func=uid_key)
 
 @router.get("/release/{discogs_id}")
@@ -142,14 +149,13 @@ def search_discogs_release(request: Request, _: FirebaseUserDep, response: Respo
     with httpx.Client() as client:
         headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
         discogs_response = client.get(
-            f'https://api.discogs.com/database/search',
+            'https://api.discogs.com/database/search',
             headers=headers,
             params={ "q": term, "type": "release", "format": "Vinyl" }
         )
         data = discogs_response.json()
 
-        return list(map(
-            lambda v: ({
+        return [({
                 "discogs_id": v.get("id"),
                 "master_id": v.get("master_id"),
                 "title": v.get("title"),
@@ -158,8 +164,7 @@ def search_discogs_release(request: Request, _: FirebaseUserDep, response: Respo
                 "image_url": v.get("cover_image"),
                 "disc_color_text": (v.get("formats") and len(v["formats"]) > 0 and v["formats"][0].get("text")) or "Black",
                 "barcode": v.get("barcode") and len(v["barcode"]) > 0 and v.get("barcode")[0],
-            }), data.get("results", [])
-        ))
+            }) for v in data.get("results", [])]
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 @limiter.limit("10/minute")
@@ -190,11 +195,11 @@ def add_vinyl(request: Request, data: VinylData, user: FirebaseUserDep, response
         album_colors = get_top_colors(discogs_album and discogs_album.image_url or discogs_release.image_url)
     )
 
-    doc_ref = db.collection(VINYLS).document()
+    doc_ref = db().collection(VINYLS).document()
     vinyl_data = {
         **vinyl.model_dump(),
         "user_id": user["uid"],
-        "created_at": firestore.SERVER_TIMESTAMP,
+        "created_at": SERVER_TIMESTAMP,
         "deleted": False
     }
     doc_ref.create(vinyl_data)
@@ -206,12 +211,12 @@ def add_vinyl(request: Request, data: VinylData, user: FirebaseUserDep, response
 @limiter.limit("30/minute")
 def list_vinyls(request: Request, user: FirebaseUserDep):
     docs = (
-        db.collection(VINYLS)
+        db().collection(VINYLS)
         .where(filter=FieldFilter("user_id", "==", user["uid"]))
         .where(filter=FieldFilter("deleted", "==", False))
         .stream()
     )
-    result = list(map(lambda doc: doc.to_dict() | { "id": doc.id }, docs))
+    result = [doc.to_dict() | { "id": doc.id } for doc in docs]
 
     return result
 
@@ -219,7 +224,7 @@ def list_vinyls(request: Request, user: FirebaseUserDep):
 @limiter.limit("30/minute")
 def get_user_plays(request: Request, user: FirebaseUserDep):
     play_docs = (
-        db.collection(VINYL_PLAYS)
+        db().collection(VINYL_PLAYS)
         .where(filter=FieldFilter("user_id", "==", user["uid"]))
         .stream()
     )
@@ -238,7 +243,7 @@ def get_user_plays(request: Request, user: FirebaseUserDep):
         return {"plays": []}
 
     vinyl_docs = (
-        db.collection(VINYLS)
+        db().collection(VINYLS)
         .where(filter=FieldFilter("user_id", "==", user["uid"]))
         .stream()
     )
@@ -267,7 +272,7 @@ def get_user_plays(request: Request, user: FirebaseUserDep):
     return result
 
 def get_owned_vinyl(user_id, vinyl_id):
-    doc_ref = db.collection(VINYLS).document(vinyl_id)
+    doc_ref = db().collection(VINYLS).document(vinyl_id)
     doc = doc_ref.get()
     if doc.exists:
         vinyl = doc.to_dict() | { "id": doc.id }
@@ -313,7 +318,7 @@ def update_vinyl(vinyl_id, data: VinylData, user: FirebaseUserDep):
 
 class Favorite(BaseModel): favorite: bool
 @router.put("/{vinyl_id}/favorite")
-def update_vinyl(vinyl_id, data: Favorite, user: FirebaseUserDep):
+def update_vinyl_favorite(vinyl_id, data: Favorite, user: FirebaseUserDep):
     vinyl, doc_ref = get_owned_vinyl(user["uid"], vinyl_id)
     doc_ref.update({ "favorite": data.favorite })
 
@@ -329,9 +334,9 @@ def delete_vinyl(vinyl_id, user: FirebaseUserDep):
 def play_vinyl(request: Request, vinyl_id, data: VinylPlayData, user: FirebaseUserDep):
     vinyl, _ = get_owned_vinyl(user["uid"], vinyl_id)
     sides = data.sides if data.sides.__len__() > 0 else list(range(1, vinyl.n_sides + 1))
-    timestamp = data.timestamp or firestore.SERVER_TIMESTAMP
+    timestamp = data.timestamp or SERVER_TIMESTAMP
 
-    doc_ref = db.collection(VINYL_PLAYS).document()
+    doc_ref = db().collection(VINYL_PLAYS).document()
     play_data = {
         "user_id": user["uid"],
         "vinyl_id": vinyl_id,
@@ -353,16 +358,16 @@ def play_vinyl(request: Request, vinyl_id, data: VinylPlayData, user: FirebaseUs
 def get_vinyl_plays(vinyl_id, user: FirebaseUserDep):
     vinyl, _ = get_owned_vinyl(user["uid"], vinyl_id)
     docs = (
-        db.collection(VINYL_PLAYS)
+        db().collection(VINYL_PLAYS)
         .where(filter=FieldFilter("user_id", "==", user["uid"]))
         .where(filter=FieldFilter("vinyl_id", "==", vinyl_id))
         .stream()
     )
-    plays = list(map(lambda doc: {
+    plays = [{
         "play_id": doc.id,
         "sides": doc.to_dict()["sides"],
         "timestamp": doc.to_dict()["timestamp"]
-    }, docs))
+    } for doc in docs]
 
     return {
         "album": vinyl.album,
@@ -374,7 +379,7 @@ def get_vinyl_plays(vinyl_id, user: FirebaseUserDep):
 
 @router.delete("/{vinyl_id}/plays/{play_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_play(vinyl_id, play_id, user: FirebaseUserDep):
-    doc_ref = db.collection(VINYL_PLAYS).document(play_id)
+    doc_ref = db().collection(VINYL_PLAYS).document(play_id)
     doc = doc_ref.get()
     if doc.exists:
         vinyl_play = doc.to_dict() | { "id": doc.id }

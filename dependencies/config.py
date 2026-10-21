@@ -2,6 +2,7 @@
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
   frontend_url: str = 'http://localhost:5173'
   google_application_credentials: SecretStr | None = None 
@@ -10,4 +11,4 @@ class Settings(BaseSettings):
 
   model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
-settings = Settings()
+settings = Settings() # pyright: ignore[reportCallIssue]

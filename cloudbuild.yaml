@@ -1,0 +1,27 @@
+steps:
+  - id: checks
+    name: python:3.14-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install -q -r requirements.txt -r requirements-dev.txt
+        ruff check .
+        pyright
+
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args: [build, -t, $_IMAGE:$COMMIT_SHA, .]
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, $_IMAGE:$COMMIT_SHA]
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args: [run, deploy, tracker-services, --image, $_IMAGE:$COMMIT_SHA, --region, $_REGION]
+
+substitutions:
+  _REGION: us-central1
+  _IMAGE: us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/tracker-services

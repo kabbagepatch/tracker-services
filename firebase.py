@@ -1,11 +1,13 @@
 import firebase_admin
 from firebase_admin import credentials
+
 from dependencies.config import settings
+
 
 def init_firebase():
     if not firebase_admin._apps:
-        cred_path = settings.google_application_credentials.get_secret_value()
-        if cred_path:
+        if settings.google_application_credentials:
+            cred_path = settings.google_application_credentials.get_secret_value()
             cred = credentials.Certificate(cred_path)
             firebase_admin.initialize_app(cred)
         else:

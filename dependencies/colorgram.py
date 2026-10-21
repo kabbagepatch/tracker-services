@@ -1,36 +1,28 @@
-# -*- coding: utf-8 -*-
 
 # https://github.com/dwiv/colorgram.py/blob/79de8bedbc9de9228c7e479c2211dcf9c39e9282/colorgram/colorgram.py
 
-from __future__ import unicode_literals
-from __future__ import division
 
-import httpx
 import array
+from collections import namedtuple
 from io import BytesIO
 from urllib.parse import urlparse
-from collections import namedtuple
+
+import httpx
 from PIL import Image
 
-import sys
-if sys.version_info[0] <= 2:
-    range = xrange
-    ARRAY_DATATYPE = b'l'
-else:
-    ARRAY_DATATYPE = 'l'
+ARRAY_DATATYPE = 'l'
 
 Rgb = namedtuple('Rgb', ('r', 'g', 'b'))
 Hsl = namedtuple('Hsl', ('h', 's', 'l'))
 TraditionalHsl = namedtuple('TraditionalHsl', ('h', 's', 'l'))
 
-class Color(object):
+class Color:
     def __init__(self, r, g, b, proportion):
         self.rgb = Rgb(r, g, b)
         self.proportion = proportion
     
     def __repr__(self):
-        return "<colorgram.py Color: {}, {}%>".format(
-            str(self.rgb), str(self.proportion * 100))
+        return f"<colorgram.py Color: {self.rgb!s}, {self.proportion * 100!s}%>"
 
     @property
     def hsl(self):
@@ -67,7 +59,7 @@ def get_top_colors(image_url):
 
         colors = extract(image, 10)
         return [color.hex for color in colors]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print("Error opening image", e)
         return []
 
@@ -97,7 +89,7 @@ def sample(image):
             # 0bYYhhllrrggbb - luminance, hue, luminosity, red, green, blue.
 
             r, g, b = pixels[x, y][:3]
-            h, s, l = hsl(r, g, b) #this is still using the original HSL in case it's necessry for proper function
+            h, _s, l = hsl(r, g, b) #this is still using the original HSL in case it's necessry for proper function
             # Standard constants for converting RGB to relative luminance.
             Y = int(r * 0.2126 + g * 0.7152 + b * 0.0722)
 
