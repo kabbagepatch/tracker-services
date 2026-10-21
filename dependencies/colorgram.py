@@ -5,10 +5,10 @@
 from __future__ import unicode_literals
 from __future__ import division
 
-import os
+import httpx
 import array
-import tempfile
-import urllib.request
+from io import BytesIO
+from urllib.parse import urlparse
 from collections import namedtuple
 from PIL import Image
 
@@ -49,26 +49,27 @@ class Color(object):
             return self._hex
 
 def get_top_colors(image_url):
-    local_filename = "downloaded_image.png"
+    parsed_url = urlparse(image_url)
+    if parsed_url.scheme != "https" or parsed_url.hostname != "i.discogs.com":
+        return []
     try:
-        opener = urllib.request.build_opener()
-        opener.addheaders = [('User-Agent', 'MyApp/1.0')]
+        with httpx.stream("GET", image_url, timeout=10) as response:
+            response.raise_for_status()
+            data = b""
+            for chunk in response.iter_bytes():
+                data += chunk
+                if len(data) > 5_000_000:
+                    return []
+        image = Image.open(BytesIO(data))
+        if image.width * image.height > 20_000_000:
+            return []
+        image.thumbnail((100, 100))
 
-        with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as tmp:
-            local_filename = tmp.name
-
-        with opener.open(image_url, timeout=15) as response:
-            with open(local_filename, "wb") as image_file:
-                image_file.write(response.read())
-
-        print(local_filename)
-        colors = extract(local_filename, 10)
+        colors = extract(image, 10)
         return [color.hex for color in colors]
     except Exception as e:
         print("Error opening image", e)
-    finally:
-        if os.path.exists(local_filename):
-            os.remove(local_filename)
+        return []
 
 def extract(f, number_of_colors):
     image = f if isinstance(f, Image.Image) else Image.open(f)

@@ -2,3 +2,7 @@
 __pycache__
 secrets
 .env
+.git
+.claude
+.ruff_cache
+security-notes.md
