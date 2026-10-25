@@ -6,9 +6,10 @@ steps:
       - -c
       - |
         apt-get update -qq && apt-get install -y -qq --no-install-recommends libatomic1
-        pip install -q -r requirements.txt -r requirements-dev.txt
+        pip install -q . --group dev
         ruff check .
         pyright
+        pytest
 
   - id: build
     name: gcr.io/cloud-builders/docker

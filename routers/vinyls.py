@@ -1,17 +1,16 @@
-from datetime import datetime
-
-import httpx
+import httpx2 as httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from firebase_admin import firestore
 from google.cloud.firestore import SERVER_TIMESTAMP
 from google.cloud.firestore_v1.base_query import FieldFilter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from dependencies.colorgram import get_top_colors
 from dependencies.config import settings
 from dependencies.firebase_auth import FirebaseUserDep
+from schemas.vinyls import DiscogsAlbum, DiscogsRelease, Vinyl, VinylData, VinylPlayData
 
 router = APIRouter(
     prefix="/vinyls",
@@ -24,66 +23,10 @@ def db():
 VINYLS = "vinyls"
 VINYL_PLAYS = "vinyl_plays"
 
-class Track(BaseModel):
-    position: str = ''
-    type_: str = ''
-    title: str = ''
-    duration: str = ''
-
-class DiscogsAlbum(BaseModel):
-    id: int | str = ''
-    album: str
-    artist: str
-    genres: list[str] = []
-    published: int | None = None
-    image_url: str = ''
-
-class Common(BaseModel):
-    album: str
-    artist: str
-    genres: list[str] = []
-    published: int | None = None
-    image_url: str = ''
-    tracks: list[Track] = []
-    disc_color_text: str = ''
-    n_sides: int
-
-class DiscogsRelease(Common):
-    id: int
-    master_id: int | None = None
-    barcode: str | None = None
-
-class VinylData(BaseModel):
-    discogs_id: int | None = None
-    album: str = Field('', max_length=200)
-    artist: str = Field('', max_length=200)
-    n_sides: int | None = Field(None, ge=1, le=26)
-    disc_color_hex: str = Field('', pattern=r'^(#[0-9a-fA-F]{6})?$')
-
-class Vinyl(Common):
-    discogs_release_id: int | str
-    discogs_master_id: int | str | None = None
-    disc_color_hex: str = ''
-    release_image_url: str | None = None
-    album_image_url: str | None = None
-    favorite: bool = False
-    album_colors: list[str] = []
-    deleted: bool = False
-
-class VinylPlayData(BaseModel):
-    sides: list[int] = Field([], max_length=26)
-    timestamp: datetime | None = None
-
-class VinylPlay(BaseModel):
-    user_id: str
-    vinyl_id: str
-    sides: int
-    timestamp: str
-
-def get_discogs_release(discogs_id):
+def get_discogs_release(release_id):
     with httpx.Client() as client:
         headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
-        discogs_response = client.get(f'https://api.discogs.com/releases/{discogs_id}', headers=headers)
+        discogs_response = client.get(f'https://api.discogs.com/releases/{release_id}', headers=headers)
         try: discogs_response.raise_for_status()
         except httpx.HTTPStatusError: return
 
@@ -93,7 +36,7 @@ def get_discogs_release(discogs_id):
         first = (data.get("tracklist") or [{}])[-1].get("position", "")[:1].upper()
         n_sides = ord(first) - ord('A') + 1 if 'A' <= first <= 'Z' else 2
         return DiscogsRelease(
-            id=discogs_id,
+            id=release_id,
             master_id=data.get("master_id"),
             album=data.get("title"),
             artist=data["artists"][0].get("name"),
@@ -129,10 +72,10 @@ def uid_key(request: Request):
     return getattr(request.state, "uid", None) or get_remote_address(request)
 limiter = Limiter(key_func=uid_key)
 
-@router.get("/release/{discogs_id}")
+@router.get("/release/{release_id}")
 @limiter.limit("10/minute")
-def get_release(request: Request, discogs_id: int, _: FirebaseUserDep):
-    return get_discogs_release(discogs_id)
+def get_release(request: Request, release_id: int, _: FirebaseUserDep):
+    return get_discogs_release(release_id)
 
 @router.get("/album/{master_id}")
 @limiter.limit("10/minute")
@@ -156,7 +99,7 @@ def search_discogs_release(request: Request, _: FirebaseUserDep, response: Respo
         data = discogs_response.json()
 
         return [({
-                "discogs_id": v.get("id"),
+                "release_id": v.get("id"),
                 "master_id": v.get("master_id"),
                 "title": v.get("title"),
                 "published": v.get("year"),
@@ -169,14 +112,14 @@ def search_discogs_release(request: Request, _: FirebaseUserDep, response: Respo
 @router.post("/", status_code=status.HTTP_201_CREATED)
 @limiter.limit("10/minute")
 def add_vinyl(request: Request, data: VinylData, user: FirebaseUserDep, response: Response):
-    if not data.discogs_id:
+    if not data.release_id:
         response.status_code = status.HTTP_400_BAD_REQUEST
-        return { "message": "discogs_id is required. Custom vinyls not supported at the moment" }
+        return { "message": "release_id is required. Custom vinyls not supported at the moment" }
     
-    discogs_release = get_discogs_release(data.discogs_id)
+    discogs_release = get_discogs_release(data.release_id)
     if not discogs_release:
         response.status_code = status.HTTP_400_BAD_REQUEST
-        return { "message": "Invalid discogs_id. No release found" }
+        return { "message": "Invalid release_id. No release found" }
     discogs_album = get_discogs_album(discogs_release.master_id)
 
     vinyl = Vinyl(

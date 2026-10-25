@@ -4,3 +4,7 @@ secrets
 .env
 .ruff_cache
 .claude
+build/
+*.egg-info/
+htmlcov
+.coverage

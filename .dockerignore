@@ -6,3 +6,5 @@ secrets
 .claude
 .ruff_cache
 security-notes.md
+htmlcov
+.coverage

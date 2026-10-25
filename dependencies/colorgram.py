@@ -7,7 +7,7 @@ from collections import namedtuple
 from io import BytesIO
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 from PIL import Image
 
 ARRAY_DATATYPE = 'l'
@@ -41,6 +41,9 @@ class Color:
             return self._hex
 
 def get_top_colors(image_url):
+    if not image_url:
+        return []
+
     parsed_url = urlparse(image_url)
     if parsed_url.scheme != "https" or parsed_url.hostname != "i.discogs.com":
         return []
