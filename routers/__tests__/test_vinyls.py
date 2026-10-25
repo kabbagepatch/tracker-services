@@ -6,7 +6,10 @@ from fastapi.testclient import TestClient
 from google.api_core import exceptions
 from google.cloud.firestore import SERVER_TIMESTAMP
 from google.cloud.firestore_v1.base_query import FieldFilter
+from pydantic import SecretStr
 
+from dependencies.colorgram import get_top_colors
+from dependencies.config import Settings, get_settings
 from dependencies.firebase_auth import get_firebase_user_from_token
 from schemas.vinyls import DiscogsAlbum, DiscogsRelease, Track, Vinyl, VinylPlay
 
@@ -54,6 +57,7 @@ mock_vinyl_full = Vinyl(
     disc_color_text="Orange marbled",
     favorite=False,
     deleted=False,
+    album_colors=['#14521a', '#51faa2'],
 )
 mock_discogs_release_full = DiscogsRelease(
     id=999,
@@ -154,12 +158,14 @@ def test_create_vinyl_default(mock_db, mock_get_discogs_release, mock_get_discog
         "deleted": False
     })
 
+@patch("routers.vinyls.get_top_colors")
 @patch("routers.vinyls.get_discogs_album")
 @patch("routers.vinyls.get_discogs_release")
 @patch("routers.vinyls.db")
-def test_create_vinyl_full(mock_db, mock_get_discogs_release, mock_get_discogs_album):
+def test_create_vinyl_full(mock_db, mock_get_discogs_release, mock_get_discogs_album, mock_get_top_colors):
     mock_get_discogs_release.return_value = mock_discogs_release_full
     mock_get_discogs_album.return_value = mock_discogs_album
+    mock_get_top_colors.return_value = ['#14521a', '#51faa2']
     mock_collection = MagicMock()
     mock_document = MagicMock()
     mock_document.return_value.create.return_value = "Mocked Response"

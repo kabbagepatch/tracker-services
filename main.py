@@ -8,7 +8,7 @@ from slowapi.extension import _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
-from dependencies.config import settings
+from dependencies.config import get_settings
 from firebase import init_firebase
 from middleware.process_time import ProcessTimeMiddleware
 from routers.health import router as health_router
@@ -30,7 +30,7 @@ app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=[get_settings().frontend_url],
     allow_methods=["*"],
     allow_headers=["*"],
 )

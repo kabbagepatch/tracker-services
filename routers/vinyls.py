@@ -8,7 +8,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from dependencies.colorgram import get_top_colors
-from dependencies.config import settings
+from dependencies.config import get_settings
 from dependencies.firebase_auth import FirebaseUserDep
 from schemas.vinyls import DiscogsAlbum, DiscogsRelease, Vinyl, VinylData, VinylPlayData
 
@@ -25,6 +25,7 @@ VINYL_PLAYS = "vinyl_plays"
 
 def get_discogs_release(release_id):
     with httpx.Client() as client:
+        settings = get_settings()
         headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
         discogs_response = client.get(f'https://api.discogs.com/releases/{release_id}', headers=headers)
         try: discogs_response.raise_for_status()
@@ -53,6 +54,7 @@ def get_discogs_album(master_id):
     if not master_id: return
 
     with httpx.Client() as client:
+        settings = get_settings()
         headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
         discogs_response = client.get(f'https://api.discogs.com/masters/{master_id}', headers=headers)
         try: discogs_response.raise_for_status()
@@ -90,6 +92,7 @@ def search_discogs_release(request: Request, _: FirebaseUserDep, response: Respo
         return { "message": "Search term of at least length 3 is required" }
 
     with httpx.Client() as client:
+        settings = get_settings()
         headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
         discogs_response = client.get(
             'https://api.discogs.com/database/search',
