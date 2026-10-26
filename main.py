@@ -11,6 +11,7 @@ from slowapi.util import get_remote_address
 from dependencies.config import get_settings
 from firebase import init_firebase
 from middleware.process_time import ProcessTimeMiddleware
+from routers.discogs import router as discogs_router
 from routers.health import router as health_router
 from routers.users import router as users_router
 from routers.vinyls import router as vinyls_router
@@ -21,7 +22,7 @@ async def lifespan(app: FastAPI):
     init_firebase()
     yield
 
-app = FastAPI(lifespan=lifespan,docs_url=None, redoc_url=None)
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 app.state.limiter = limiter
@@ -37,6 +38,7 @@ app.add_middleware(
 
 app.add_middleware(ProcessTimeMiddleware)
 
+app.include_router(discogs_router)
 app.include_router(health_router)
 app.include_router(users_router)
 app.include_router(vinyls_router)

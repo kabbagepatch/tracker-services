@@ -12,7 +12,7 @@ def get_firebase_user_from_token(request: Request, token: Annotated[HTTPAuthoriz
         if not token:
             raise ValueError("No token")
         user = verify_id_token(token.credentials)
-    except Exception as e:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid/Missing credentials",
