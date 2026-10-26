@@ -17,6 +17,7 @@ dev = [
     "ruff~=0.17.1",
     "pytest~=9.1.1",
     "pytest-cov~=7.1.0",
+    "pytest-watcher>=0.6.3",
 ]
 
 [build-system]
@@ -42,6 +43,11 @@ addopts = [
 omit = [
     "**/__tests__/*",
     "**/__init__.py",
+    "./middleware/*",
+    "./dependencies/config.py",
+    "./dependencies/colorgram.py",
+    "./main.py",
+    "./firebase.py",
 ]
 
 [tool.coverage.report]

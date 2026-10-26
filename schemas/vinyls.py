@@ -33,6 +33,7 @@ class DiscogsRelease(Common):
     barcode: str | None = None
 
 class Vinyl(Common):
+    user_id: str
     discogs_release_id: int | str
     discogs_master_id: int | str | None = None
     disc_color_hex: str = ''
@@ -44,10 +45,10 @@ class Vinyl(Common):
 
 class VinylData(BaseModel):
     release_id: int | None = None
-    album: str = Field('', max_length=200)
-    artist: str = Field('', max_length=200)
-    n_sides: int | None = Field(None, ge=1, le=26)
-    disc_color_hex: str = Field('', pattern=r'^(#[0-9a-fA-F]{6})?$')
+    album: str = Field(default='', max_length=200)
+    artist: str = Field(default='', max_length=200)
+    n_sides: int | None = Field(default=None, ge=1, le=26)
+    disc_color_hex: str = Field(default='', pattern=r'^(#[0-9a-fA-F]{6})?$')
 
 class VinylPlay(BaseModel):
     user_id: str
@@ -56,5 +57,5 @@ class VinylPlay(BaseModel):
     timestamp: str
 
 class VinylPlayData(BaseModel):
-    sides: list[int] = Field([], max_length=26)
+    sides: list[int] = Field(default=[], max_length=26)
     timestamp: datetime | None = None

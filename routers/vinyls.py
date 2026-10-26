@@ -7,9 +7,9 @@ from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from dependencies.colorgram import get_top_colors
 from dependencies.config import get_settings
 from dependencies.firebase_auth import FirebaseUserDep
+from dependencies.image_colors import get_top_colors
 from schemas.vinyls import DiscogsAlbum, DiscogsRelease, Vinyl, VinylData, VinylPlayData
 
 router = APIRouter(
@@ -102,15 +102,15 @@ def search_discogs_release(request: Request, _: FirebaseUserDep, response: Respo
         data = discogs_response.json()
 
         return [({
-                "release_id": v.get("id"),
-                "master_id": v.get("master_id"),
-                "title": v.get("title"),
-                "published": v.get("year"),
-                "genres": v.get("genre"),
-                "image_url": v.get("cover_image"),
-                "disc_color_text": (v.get("formats") and len(v["formats"]) > 0 and v["formats"][0].get("text")) or "Black",
-                "barcode": v.get("barcode") and len(v["barcode"]) > 0 and v.get("barcode")[0],
-            }) for v in data.get("results", [])]
+            "release_id": v.get("id"),
+            "master_id": v.get("master_id"),
+            "title": v.get("title"),
+            "published": v.get("year"),
+            "genres": v.get("genre"),
+            "image_url": v.get("cover_image"),
+            "disc_color_text": (v.get("formats") and len(v["formats"]) > 0 and v["formats"][0].get("text")) or "Black",
+            "barcode": v.get("barcode") and len(v["barcode"]) > 0 and v.get("barcode")[0],
+        }) for v in data.get("results", [])]
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 @limiter.limit("10/minute")
@@ -126,6 +126,7 @@ def add_vinyl(request: Request, data: VinylData, user: FirebaseUserDep, response
     discogs_album = get_discogs_album(discogs_release.master_id)
 
     vinyl = Vinyl(
+        user_id = user["uid"],
         discogs_release_id = discogs_release.id,
         discogs_master_id = discogs_release.master_id,
         album = discogs_release.album,
@@ -138,15 +139,14 @@ def add_vinyl(request: Request, data: VinylData, user: FirebaseUserDep, response
         image_url = discogs_album and discogs_album.image_url or discogs_release.image_url,
         release_image_url = discogs_release.image_url,
         album_image_url = discogs_album and discogs_album.image_url,
-        album_colors = get_top_colors(discogs_album and discogs_album.image_url or discogs_release.image_url)
+        album_colors = get_top_colors(discogs_album and discogs_album.image_url or discogs_release.image_url),
+        deleted = False,
     )
 
     doc_ref = db().collection(VINYLS).document()
     vinyl_data = {
         **vinyl.model_dump(),
-        "user_id": user["uid"],
         "created_at": SERVER_TIMESTAMP,
-        "deleted": False
     }
     doc_ref.create(vinyl_data)
     saved_vinyl = doc_ref.get().to_dict()
@@ -186,7 +186,7 @@ def get_user_plays(request: Request, user: FirebaseUserDep):
         for d in [doc.to_dict()]
     ]
     if not plays:
-        return {"plays": []}
+        return []
 
     vinyl_docs = (
         db().collection(VINYLS)
