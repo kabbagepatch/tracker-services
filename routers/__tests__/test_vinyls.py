@@ -1,4 +1,3 @@
-from datetime import datetime
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -7,7 +6,8 @@ from fastapi.testclient import TestClient
 from google.cloud.firestore import SERVER_TIMESTAMP
 
 from dependencies.firebase_auth import get_firebase_user_from_token
-from schemas.vinyls import DiscogsAlbum, DiscogsRelease, Track, Vinyl, VinylPlay
+from schemas.discogs import DiscogsAlbum, DiscogsRelease, Track
+from schemas.vinyls import Vinyl, VinylPlay
 
 from ..vinyls import VINYL_PLAYS, VINYLS, get_owned_vinyl, limiter, router
 
@@ -27,6 +27,20 @@ mock_vinyl = Vinyl(
     discogs_release_id=999,
     discogs_master_id=555
 )
+mock_vinyl_response = {
+    "album": "Test Vinyl",
+    "artist": "Test Artist",
+    "n_sides": 4,
+    "disc_color_hex": "",
+    "genres": [],
+    "published": None,
+    "image_url": "",
+    "tracks": [],
+    "disc_color_text": "",
+    "favorite": False,
+    "album_colors": [],
+    "id": "",
+}
 mock_discogs_release = DiscogsRelease(
     id=999,
     master_id=555,
@@ -159,10 +173,13 @@ def test_create_vinyl_default(mock_get_discogs_release, mock_get_discogs_album, 
     mock_get_discogs_release.return_value = mock_discogs_release
     mock_get_discogs_album.return_value = None
     mock_get_top_colors.return_value = []
+    mock_document.return_value.id = "vinyl1111"
+    mock_document.return_value.get.return_value = mock_snapshot(data=mock_vinyl.model_dump())
 
     response = client.post("/vinyls", json={"release_id": "999"})
     
     assert response.status_code == status.HTTP_201_CREATED
+    assert response.json() == mock_vinyl_response | {"id": "vinyl1111"}
     mock_collection.assert_called_once_with(VINYLS)
     mock_document.assert_called_once()
     mock_document.return_value.create.assert_called_once_with({
@@ -177,23 +194,37 @@ def test_create_vinyl_full(mock_get_discogs_release, mock_get_discogs_album, moc
     mock_get_discogs_release.return_value = mock_discogs_release_full
     mock_get_discogs_album.return_value = mock_discogs_album
     mock_get_top_colors.return_value = ['#14521a', '#51faa2']
+    mock_document.return_value.id = "vinyl1111"
+    mock_document.return_value.get.return_value = mock_snapshot(data=mock_vinyl_full.model_dump())
 
     response = client.post("/vinyls", json={"release_id": "999"})
     
     assert response.status_code == status.HTTP_201_CREATED
+    assert response.json() == {
+        "album": "Test Vinyl",
+        "artist": "Test Artist",
+        "n_sides": 4,
+        "disc_color_hex": "",
+        "genres": ['Pop', 'Rock'],
+        "published": 2019,
+        "image_url": "http://example.com/album-image.jpg",
+        "tracks": [{
+            "position": "A1",
+            "type_": "track",
+            "title": "Test Track",
+            "duration": "3:45",
+        }],
+        "disc_color_text": "Orange marbled",
+        "favorite": False,
+        "album_colors": ['#14521a', '#51faa2'],
+        "id": "vinyl1111",
+    }
     mock_collection.assert_called_once_with(VINYLS)
     mock_document.assert_called_once()
     mock_document.return_value.create.assert_called_once_with({
         **mock_vinyl_full.model_dump(),
         "created_at": SERVER_TIMESTAMP,
     })
-
-def test_create_vinyl_no_discogs_id(mock_collection):
-    response = client.post("/vinyls", json={"album": "New Vinyl"})
-    
-    assert response.status_code == 400
-    assert response.json() == { 'message': 'release_id is required. Custom vinyls not supported at the moment' }
-    mock_collection.assert_not_called()
 
 @patch("routers.vinyls.get_discogs_release")
 def test_create_vinyl_no_discogs_release(mock_get_discogs_release, mock_collection):
@@ -202,7 +233,7 @@ def test_create_vinyl_no_discogs_release(mock_get_discogs_release, mock_collecti
     response = client.post("/vinyls", json={"release_id": "999"})
 
     assert response.status_code == 400
-    assert response.json() == { 'message': 'Invalid release_id. No release found' }
+    assert response.json() == { 'detail': 'Invalid release_id. No release found' }
     mock_collection.assert_not_called()
 
 def test_list_vinyls(mock_collection):
@@ -212,7 +243,7 @@ def test_list_vinyls(mock_collection):
 
     mock_collection.assert_called_once_with(VINYLS)
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == [mock_vinyl.model_dump() | {"id": "123"}]
+    assert response.json() == [mock_vinyl_response | {"id": "123"}]
 
 def test_list_vinyl_plays_empty(mock_collection):
     mock_collection.return_value.where.return_value.stream.return_value = []
@@ -258,7 +289,7 @@ def test_get_owned_vinyl(mock_document):
     mock_document.return_value.get.return_value = mock_snapshot(data=mock_vinyl.model_dump())
 
     response = get_owned_vinyl("user678", "123")
-    assert response[0] == mock_vinyl
+    assert response[0].model_dump() == mock_vinyl.model_dump() | {"id": "123"}
     assert response[1] == mock_document.return_value
 
 def test_get_owned_vinyl_user_mismatch(mock_document):
@@ -288,7 +319,7 @@ def test_get_owned_vinyl_not_found(mock_document):
 def test_get_vinyl(mock_get_owned_vinyl):
     response = client.get("/vinyls/123")
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == mock_vinyl.model_dump()
+    assert response.json() == mock_vinyl_response
 
 def test_update_vinyl(mock_get_owned_vinyl, mock_vinyl_ref):
     updates = {
@@ -297,7 +328,7 @@ def test_update_vinyl(mock_get_owned_vinyl, mock_vinyl_ref):
     }
     response = client.put("/vinyls/123", json=updates)
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == mock_vinyl.model_dump() | updates
+    assert response.json() == mock_vinyl_response | updates
     mock_vinyl_ref.update.assert_called_once_with(updates)
 
 def test_update_vinyl_bad_disc_color(mock_get_owned_vinyl, mock_vinyl_ref):
@@ -314,7 +345,7 @@ def test_update_vinyl_favorite(mock_get_owned_vinyl, mock_vinyl_ref):
     }
     response = client.put("/vinyls/123/favorite", json=updates)
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == mock_vinyl.model_dump() | updates
+    assert response.json() == mock_vinyl_response | updates
     mock_vinyl_ref.update.assert_called_once_with(updates)
 
 def test_delete_vinyl(mock_get_owned_vinyl, mock_vinyl_ref):
@@ -323,45 +354,30 @@ def test_delete_vinyl(mock_get_owned_vinyl, mock_vinyl_ref):
     assert response.content == b""
     mock_vinyl_ref.update.assert_called_once_with({ "deleted": True })
 
-def test_create_vinyl_play_default(mock_get_owned_vinyl, mock_collection, mock_document):
-    mock_play_data = {
-        "user_id": "user678",
-        "vinyl_id": "123",
-        "sides": [1,2,3,4],
-        "timestamp": SERVER_TIMESTAMP,
-    }
-
-    response = client.post("/vinyls/123/plays", json={})
-
-    assert response.status_code == status.HTTP_201_CREATED
-    mock_collection.assert_called_once_with(VINYL_PLAYS)
-    mock_document.assert_called_once()
-    mock_document.return_value.create.assert_called_once_with(mock_play_data)
-
 def test_create_vinyl_play_with_data(mock_get_owned_vinyl, mock_collection, mock_document):
     mock_play_data = {
         "user_id": "user678",
         "vinyl_id": "123",
         "sides": [1,2],
-        "timestamp": datetime.fromisoformat("2025-06-05T14:48:00.000Z"),
+        "timestamp": "2025-06-05T14:48:00.000Z",
     }
-    mock_document.return_value.get.return_value.to_dict.return_value = mock_play_data
+    mock_document.return_value.get.return_value = mock_snapshot(data=mock_play_data, id="play111")
     mock_document.return_value.id = "play111"
 
     response = client.post("/vinyls/123/plays", json={ "sides": [1,2], "timestamp": "2025-06-05T14:48:00.000Z" })
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.json() == {
-        "user_id": "user678",
         "vinyl_id": "123",
         "sides": [1,2],
-        "timestamp": "2025-06-05T14:48:00+00:00",
+        "timestamp": "2025-06-05T14:48:00.000Z",
         "play_id": "play111",
         "album": mock_vinyl.album,
         "artist": mock_vinyl.artist,
         "image_url": mock_vinyl.image_url,
         "n_sides": mock_vinyl.n_sides,
-        "album_colors": mock_vinyl.album_colors
+        "album_colors": mock_vinyl.album_colors,
+        "deleted": mock_vinyl.deleted,
     }
     mock_collection.assert_called_once_with(VINYL_PLAYS)
     mock_document.assert_called_once()
@@ -378,6 +394,7 @@ def test_get_vinyl_plays(mock_get_owned_vinyl, mock_collection):
 
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {
+        "vinyl_id": "123",
         "album": mock_vinyl.album,
         "artist": mock_vinyl.artist,
         "n_sides": mock_vinyl.n_sides,

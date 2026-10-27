@@ -6,7 +6,7 @@ from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 
 from dependencies.firebase_auth import get_firebase_user_from_token
-from schemas.vinyls import DiscogsAlbum, DiscogsRelease, Track
+from schemas.discogs import DiscogsAlbum, DiscogsRelease, Track
 
 from ..discogs import get_discogs_album, get_discogs_release, limiter, router
 
@@ -134,7 +134,7 @@ def test_get_discogs_release_error(mock_get_settings, mock_Client, mock_client):
 
 
 @patch("routers.discogs.get_settings")
-def test_get_album_release(mock_get_settings, mock_Client, mock_client):
+def test_get_discogs_album(mock_get_settings, mock_Client, mock_client):
     mock_album_result = {
         "id": 555,
         "title": "Test Vinyl",
@@ -151,7 +151,7 @@ def test_get_album_release(mock_get_settings, mock_Client, mock_client):
     assert mock_client.get.call_args.args[0] == "https://api.discogs.com/masters/555"
 
 @patch("routers.discogs.get_settings")
-def test_get_album_release_error(mock_get_settings, mock_Client, mock_client):
+def test_get_discogs_album_error(mock_get_settings, mock_Client, mock_client):
     mock_client.get.return_value.raise_for_status.side_effect = httpx.HTTPStatusError("Error", request=MagicMock(), response=MagicMock())
 
     result = get_discogs_album(555)
@@ -168,6 +168,15 @@ def test_get_release(mock_get_discogs_release):
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == mock_discogs_release.model_dump()
 
+@patch("routers.discogs.get_discogs_release")
+def test_get_release_not_found(mock_get_discogs_release):
+    mock_get_discogs_release.return_value = None
+
+    response = client.get("/vinyls/release/999")
+    
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.json() == {"detail": "Release not found"}
+
 @patch("routers.discogs.get_discogs_album")
 def test_get_album(mock_get_discogs_album):
     mock_get_discogs_album.return_value = mock_discogs_album
@@ -176,6 +185,15 @@ def test_get_album(mock_get_discogs_album):
     
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == mock_discogs_album.model_dump()
+
+@patch("routers.discogs.get_discogs_album")
+def test_get_album_not_found(mock_get_discogs_album):
+    mock_get_discogs_album.return_value = None
+
+    response = client.get("/vinyls/album/555")
+    
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.json() == {"detail": "Album not found"}
 
 @patch("routers.discogs.get_settings")
 def test_search_discogs_release(mock_get_settings, mock_Client, mock_client):
@@ -221,7 +239,7 @@ def test_search_discogs_release_no_term(mock_get_discogs_album):
     response = client.get("/vinyls/search")
     
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert response.json() == {"message": "Search term of at least length 3 is required"}
+    assert response.json() == {"detail": "Search term of at least length 3 is required"}
 
 @patch("routers.discogs.get_discogs_album")
 def test_search_discogs_release_short_term(mock_get_discogs_album):
@@ -230,4 +248,4 @@ def test_search_discogs_release_short_term(mock_get_discogs_album):
     response = client.get("/vinyls/search?term=ab")
     
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert response.json() == {"message": "Search term of at least length 3 is required"}
+    assert response.json() == {"detail": "Search term of at least length 3 is required"}

@@ -3,5 +3,5 @@ from fastapi import APIRouter
 router = APIRouter()
 
 @router.get("/health", tags=["health"])
-def hello():
-  return "We are live!"
+def health():
+  return { "message": "We are live!", "version": "0.1.0" }

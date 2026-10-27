@@ -1,11 +1,11 @@
 import httpx2 as httpx
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from dependencies.config import get_settings
 from dependencies.firebase_auth import FirebaseUserDep
-from schemas.vinyls import DiscogsAlbum, DiscogsRelease
+from schemas.discogs import DiscogsAlbum, DiscogsRelease, DiscogsSearchResult
 
 router = APIRouter(
     prefix="/vinyls",
@@ -67,20 +67,25 @@ limiter = Limiter(key_func=uid_key)
 
 @router.get("/release/{release_id}")
 @limiter.limit("10/minute")
-def get_release(request: Request, release_id: int, _: FirebaseUserDep):
-    return get_discogs_release(release_id)
+def get_release(request: Request, release_id: int, _: FirebaseUserDep) -> DiscogsRelease:
+    release = get_discogs_release(release_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="Release not found")
+    return release
 
 @router.get("/album/{master_id}")
 @limiter.limit("10/minute")
-def get_album(request: Request, master_id: int, _: FirebaseUserDep):
-    return get_discogs_album(master_id)
+def get_album(request: Request, master_id: int, _: FirebaseUserDep) -> DiscogsAlbum:
+    album = get_discogs_album(master_id)
+    if not album:
+        raise HTTPException(status_code=404, detail="Album not found")
+    return album
 
 @router.get("/search")
 @limiter.limit("10/minute")
-def search_discogs_release(request: Request, _: FirebaseUserDep, response: Response, term: str = ''):
+def search_discogs_release(request: Request, _: FirebaseUserDep, response: Response, term: str = '') -> list[DiscogsSearchResult]:
     if len(term) <= 2:
-        response.status_code = 400
-        return { "message": "Search term of at least length 3 is required" }
+        raise HTTPException(status_code=400, detail="Search term of at least length 3 is required")
 
     with httpx.Client() as client:
         settings = get_settings()
@@ -92,13 +97,13 @@ def search_discogs_release(request: Request, _: FirebaseUserDep, response: Respo
         )
         data = discogs_response.json()
 
-        return [({
-            "release_id": v.get("id"),
-            "master_id": v.get("master_id"),
-            "title": v.get("title"),
-            "published": v.get("year"),
-            "genres": v.get("genre"),
-            "image_url": v.get("cover_image"),
-            "disc_color_text": (v.get("formats") and len(v["formats"]) > 0 and v["formats"][0].get("text")) or "Black",
-            "barcode": v.get("barcode") and len(v["barcode"]) > 0 and v.get("barcode")[0],
-        }) for v in data.get("results", [])]
+        return [DiscogsSearchResult(
+            release_id=v.get("id"),
+            master_id=v.get("master_id"),
+            title=v.get("title"),
+            published=v.get("year"),
+            genres=v.get("genre"),
+            image_url=v.get("cover_image"),
+            disc_color_text=(v.get("formats") and len(v["formats"]) > 0 and v["formats"][0].get("text")) or "Black",
+            barcode=(v.get("barcode") and len(v["barcode"]) > 0) and v.get("barcode")[0] or '',
+        ) for v in data.get("results", [])]
