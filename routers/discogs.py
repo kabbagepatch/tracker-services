@@ -1,10 +1,11 @@
 import httpx2 as httpx
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from dependencies.config import get_settings
-from dependencies.firebase_auth import FirebaseUserDep
+from dependencies.firebase_auth import VerifyUserDep
+from dependencies.users import set_discogs_requests
 from schemas.discogs import DiscogsAlbum, DiscogsRelease, DiscogsSearchResult
 
 router = APIRouter(
@@ -67,25 +68,41 @@ limiter = Limiter(key_func=uid_key)
 
 @router.get("/release/{release_id}")
 @limiter.limit("10/minute")
-def get_release(request: Request, release_id: int, _: FirebaseUserDep) -> DiscogsRelease:
+@limiter.limit("20/minute", key_func=get_remote_address)
+def get_release(request: Request, release_id: int, _: VerifyUserDep) -> DiscogsRelease:
     release = get_discogs_release(release_id)
     if not release:
-        raise HTTPException(status_code=404, detail="Release not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Release not found")
     return release
 
 @router.get("/album/{master_id}")
 @limiter.limit("10/minute")
-def get_album(request: Request, master_id: int, _: FirebaseUserDep) -> DiscogsAlbum:
+@limiter.limit("20/minute", key_func=get_remote_address)
+def get_album(request: Request, master_id: int, _: VerifyUserDep) -> DiscogsAlbum:
     album = get_discogs_album(master_id)
     if not album:
-        raise HTTPException(status_code=404, detail="Album not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
     return album
 
 @router.get("/search")
 @limiter.limit("10/minute")
-def search_discogs_release(request: Request, _: FirebaseUserDep, response: Response, term: str = '') -> list[DiscogsSearchResult]:
+@limiter.limit("20/minute", key_func=get_remote_address)
+def search_discogs_release(request: Request, user: VerifyUserDep, response: Response, term: str = '') -> list[DiscogsSearchResult]:
     if len(term) <= 2:
-        raise HTTPException(status_code=400, detail="Search term of at least length 3 is required")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search term of at least length 3 is required")
+
+    user_data = user.get("user_data")
+    if not user_data:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="There was an error retrieving your user data. Please try again later."
+        )
+    requests_remaining = user_data.get("anonymous_discogs_requests_remaining", 0)
+    if user.get("is_guest", True) and requests_remaining <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Guest Discogs requests limit reached.",
+        )
 
     with httpx.Client() as client:
         settings = get_settings()
@@ -95,15 +112,19 @@ def search_discogs_release(request: Request, _: FirebaseUserDep, response: Respo
             headers=headers,
             params={ "q": term, "type": "release", "format": "Vinyl" }
         )
-        data = discogs_response.json()
 
-        return [DiscogsSearchResult(
-            release_id=v.get("id"),
-            master_id=v.get("master_id"),
-            title=v.get("title"),
-            published=v.get("year"),
-            genres=v.get("genre"),
-            image_url=v.get("cover_image"),
-            disc_color_text=(v.get("formats") and len(v["formats"]) > 0 and v["formats"][0].get("text")) or "Black",
-            barcode=(v.get("barcode") and len(v["barcode"]) > 0) and v.get("barcode")[0] or '',
-        ) for v in data.get("results", [])]
+    if user.get("is_guest", True):
+        set_discogs_requests(user["uid"], requests_remaining - 1)
+
+    data = discogs_response.json()
+
+    return [DiscogsSearchResult(
+        release_id=v.get("id"),
+        master_id=v.get("master_id"),
+        title=v.get("title"),
+        published=v.get("year"),
+        genres=v.get("genre"),
+        image_url=v.get("cover_image"),
+        disc_color_text=(v.get("formats") and len(v["formats"]) > 0 and v["formats"][0].get("text")) or "Black",
+        barcode=(v.get("barcode") and len(v["barcode"]) > 0) and v.get("barcode")[0] or '',
+    ) for v in data.get("results", [])]

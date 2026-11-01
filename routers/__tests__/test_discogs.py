@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 
-from dependencies.firebase_auth import get_firebase_user_from_token
+from dependencies.firebase_auth import verify_user
 from schemas.discogs import DiscogsAlbum, DiscogsRelease, Track
 
 from ..discogs import get_discogs_album, get_discogs_release, limiter, router
@@ -16,7 +16,10 @@ client = TestClient(app)
 
 mock_user = {
     "uid": "user678",
-    "email": "testuser@example.com"
+    "name": "Test User",
+    "email": "testuser@example.com",
+    "is_guest": False,
+    "user_data": { "uid": "user678", "name": "Test User", "email": "testuser@example.com" }
 }
 mock_discogs_release = DiscogsRelease(
     id=999,
@@ -56,7 +59,7 @@ mock_discogs_album = DiscogsAlbum(
 @pytest.fixture(autouse=True)
 def run_before_each_test():
     limiter.enabled = False
-    app.dependency_overrides[get_firebase_user_from_token] = lambda: mock_user
+    app.dependency_overrides[verify_user] = lambda: mock_user
     yield
     app.dependency_overrides.clear()
     limiter.enabled = True
@@ -165,7 +168,7 @@ def test_get_release(mock_get_discogs_release):
 
     response = client.get("/vinyls/release/999")
     
-    assert response.status_code == status.HTTP_200_OK
+    assert response.status_code == 200
     assert response.json() == mock_discogs_release.model_dump()
 
 @patch("routers.discogs.get_discogs_release")
@@ -183,7 +186,7 @@ def test_get_album(mock_get_discogs_album):
 
     response = client.get("/vinyls/album/555")
     
-    assert response.status_code == status.HTTP_200_OK
+    assert response.status_code == 200
     assert response.json() == mock_discogs_album.model_dump()
 
 @patch("routers.discogs.get_discogs_album")
@@ -213,7 +216,7 @@ def test_search_discogs_release(mock_get_settings, mock_Client, mock_client):
 
     response = client.get("/vinyls/search?term=Carly")
     
-    assert response.status_code == status.HTTP_200_OK
+    assert response.status_code == 200
     assert response.json() == [{
         "release_id": 999,
         "master_id": 555,
@@ -229,8 +232,46 @@ def test_search_discogs_release(mock_get_settings, mock_Client, mock_client):
 def test_search_discogs_release_empty(mock_get_settings, mock_Client, mock_client):
     response = client.get("/vinyls/search?term=Carly")
     
-    assert response.status_code == status.HTTP_200_OK
+    assert response.status_code == 200
     assert response.json() == []
+
+def test_search_discogs_no_user_data():
+    app.dependency_overrides[verify_user] = lambda: { "uid": "123" }
+    
+    response = client.get("/vinyls/search?term=Carly")
+    
+    assert response.status_code == 500
+    assert response.json() == {"detail": "There was an error retrieving your user data. Please try again later."}
+
+@patch("routers.discogs.set_discogs_requests")
+@patch("routers.discogs.get_settings")
+def test_search_discogs_guest(mock_get_settings, mock_set_discogs_requests, mock_Client, mock_client):
+    app.dependency_overrides[verify_user] = lambda: {
+        "uid": "user678",
+        "is_guest": True,
+        "user_data": { "uid": "user678", "anonymous_discogs_requests_remaining": 10 }
+    }
+    
+    response = client.get("/vinyls/search?term=Carly")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    mock_set_discogs_requests.assert_called_once_with("user678", 9)
+
+@patch("routers.discogs.set_discogs_requests")
+@patch("routers.discogs.get_settings")
+def test_search_discogs_guest_limit_reached(mock_get_settings, mock_set_discogs_requests, mock_Client, mock_client):
+    app.dependency_overrides[verify_user] = lambda: {
+        "uid": "user678",
+        "is_guest": True,
+        "user_data": { "uid": "user678", "anonymous_discogs_requests_remaining": 0 }
+    }
+    
+    response = client.get("/vinyls/search?term=Carly")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail":"Guest Discogs requests limit reached."}
+    mock_set_discogs_requests.assert_not_called()
 
 @patch("routers.discogs.get_discogs_album")
 def test_search_discogs_release_no_term(mock_get_discogs_album):
@@ -238,7 +279,7 @@ def test_search_discogs_release_no_term(mock_get_discogs_album):
 
     response = client.get("/vinyls/search")
     
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.status_code == 400
     assert response.json() == {"detail": "Search term of at least length 3 is required"}
 
 @patch("routers.discogs.get_discogs_album")
@@ -247,5 +288,5 @@ def test_search_discogs_release_short_term(mock_get_discogs_album):
 
     response = client.get("/vinyls/search?term=ab")
     
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.status_code == 400
     assert response.json() == {"detail": "Search term of at least length 3 is required"}

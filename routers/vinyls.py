@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from dependencies.firebase_auth import FirebaseUserDep
+from dependencies.firebase_auth import VerifyUserDep
 from dependencies.image_colors import get_top_colors
 from routers.discogs import get_discogs_album, get_discogs_release
 from schemas.vinyls import (
@@ -35,9 +35,35 @@ def uid_key(request: Request):
     return getattr(request.state, "uid", None) or get_remote_address(request)
 limiter = Limiter(key_func=uid_key)
 
+def get_vinyl_count(user_id):
+    count = (
+        db().collection(VINYLS)
+        .where(filter=FieldFilter("user_id", "==", user_id))
+        .where(filter=FieldFilter("deleted", "==", False))
+        .count()
+        .get()
+    )
+
+    return count[0][0].value
+
 @router.post("/", status_code=status.HTTP_201_CREATED)
-@limiter.limit("10/minute")
-def add_vinyl(request: Request, data: VinylCreate, user: FirebaseUserDep, response: Response) -> VinylResponse:
+@limiter.limit("20/minute")
+@limiter.limit("50/minute", key_func=get_remote_address)
+def add_vinyl(request: Request, data: VinylCreate, user: VerifyUserDep, response: Response) -> VinylResponse:
+    user_data = user.get("user_data")
+    if not user_data:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="There was an error retrieving your user data. Please try again later."
+        )
+
+    vinyl_limit = user_data.get("vinyl_limit", 1000)
+    if get_vinyl_count(user["uid"]) >= vinyl_limit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vinyl limit reached. Please delete some vinyls before adding more.",
+        )
+
     discogs_release = get_discogs_release(data.release_id)
     if not discogs_release:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid release_id. No release found")
@@ -72,8 +98,9 @@ def add_vinyl(request: Request, data: VinylCreate, user: FirebaseUserDep, respon
     return VinylResponse.model_validate(saved_vinyl | { "id": doc_ref.id })
 
 @router.get("/")
-@limiter.limit("30/minute")
-def list_vinyls(request: Request, user: FirebaseUserDep) -> list[VinylResponse]:
+@limiter.limit("60/minute")
+@limiter.limit("100/minute", key_func=get_remote_address)
+def list_vinyls(request: Request, user: VerifyUserDep) -> list[VinylResponse]:
     docs = (
         db().collection(VINYLS)
         .where(filter=FieldFilter("user_id", "==", user["uid"]))
@@ -85,8 +112,9 @@ def list_vinyls(request: Request, user: FirebaseUserDep) -> list[VinylResponse]:
     return result
 
 @router.get("/activity")
-@limiter.limit("30/minute")
-def get_user_plays(request: Request, user: FirebaseUserDep) -> list[VinylPlayResponse]:
+@limiter.limit("60/minute")
+@limiter.limit("100/minute", key_func=get_remote_address)
+def get_user_plays(request: Request, user: VerifyUserDep) -> list[VinylPlayResponse]:
     play_docs = (
         db().collection(VINYL_PLAYS)
         .where(filter=FieldFilter("user_id", "==", user["uid"]))
@@ -144,13 +172,11 @@ def get_owned_vinyl(user_id, vinyl_id) -> tuple[Vinyl, DocumentReference]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have access to this vinyl",
-                headers={"WWW-Authenticate": "Bearer"},
             )
         if vinyl["deleted"]:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This vinyl has been deleted",
-                headers={"WWW-Authenticate": "Bearer"},
             )
 
         return Vinyl.model_validate(vinyl), doc_ref
@@ -158,17 +184,16 @@ def get_owned_vinyl(user_id, vinyl_id) -> tuple[Vinyl, DocumentReference]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No vinyl found by that id",
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
 @router.get("/{vinyl_id}")
-def get_vinyl(vinyl_id, user: FirebaseUserDep) -> VinylResponse:
+def get_vinyl(vinyl_id, user: VerifyUserDep) -> VinylResponse:
     vinyl, _ = get_owned_vinyl(user["uid"], vinyl_id)
 
     return vinyl
 
 @router.put("/{vinyl_id}")
-def update_vinyl(vinyl_id, data: VinylUpdate, user: FirebaseUserDep) -> VinylResponse:
+def update_vinyl(vinyl_id, data: VinylUpdate, user: VerifyUserDep) -> VinylResponse:
     vinyl, doc_ref = get_owned_vinyl(user["uid"], vinyl_id)
     updates = {}
     if data.album: updates["album"] = data.album
@@ -182,20 +207,20 @@ def update_vinyl(vinyl_id, data: VinylUpdate, user: FirebaseUserDep) -> VinylRes
 
 class Favorite(BaseModel): favorite: bool
 @router.put("/{vinyl_id}/favorite")
-def update_vinyl_favorite(vinyl_id, data: Favorite, user: FirebaseUserDep) -> VinylResponse:
+def update_vinyl_favorite(vinyl_id, data: Favorite, user: VerifyUserDep) -> VinylResponse:
     vinyl, doc_ref = get_owned_vinyl(user["uid"], vinyl_id)
     doc_ref.update({ "favorite": data.favorite })
 
     return VinylResponse.model_validate(vinyl.model_dump() | { "favorite": data.favorite })
 
 @router.delete("/{vinyl_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_vinyl(vinyl_id, user: FirebaseUserDep) -> None:
+def delete_vinyl(vinyl_id, user: VerifyUserDep) -> None:
     _, doc_ref = get_owned_vinyl(user["uid"], vinyl_id)
     doc_ref.update({ "deleted": True })
 
 @router.post("/{vinyl_id}/plays", status_code=status.HTTP_201_CREATED)
-@limiter.limit("30/minute")
-def play_vinyl(request: Request, vinyl_id, data: VinylPlayCreate, user: FirebaseUserDep) -> VinylPlayResponse:
+@limiter.limit("60/minute")
+def play_vinyl(request: Request, vinyl_id, data: VinylPlayCreate, user: VerifyUserDep) -> VinylPlayResponse:
     vinyl, _ = get_owned_vinyl(user["uid"], vinyl_id)
     sides = data.sides if data.sides.__len__() > 0 else list(range(1, vinyl.n_sides + 1))
     timestamp = data.timestamp or SERVER_TIMESTAMP
@@ -222,7 +247,7 @@ def play_vinyl(request: Request, vinyl_id, data: VinylPlayCreate, user: Firebase
     })
 
 @router.get("/{vinyl_id}/plays")
-def get_vinyl_plays(vinyl_id, user: FirebaseUserDep) -> VinylPlaysResponse:
+def get_vinyl_plays(vinyl_id, user: VerifyUserDep) -> VinylPlaysResponse:
     vinyl, _ = get_owned_vinyl(user["uid"], vinyl_id)
     docs = (
         db().collection(VINYL_PLAYS)
@@ -246,7 +271,7 @@ def get_vinyl_plays(vinyl_id, user: FirebaseUserDep) -> VinylPlaysResponse:
     })
 
 @router.delete("/{vinyl_id}/plays/{play_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_play(vinyl_id, play_id, user: FirebaseUserDep) -> None:
+def delete_play(vinyl_id, play_id, user: VerifyUserDep) -> None:
     doc_ref = db().collection(VINYL_PLAYS).document(play_id)
     doc = doc_ref.get()
     if doc.exists:
@@ -255,14 +280,12 @@ def delete_play(vinyl_id, play_id, user: FirebaseUserDep) -> None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have access to this vinyl",
-                headers={"WWW-Authenticate": "Bearer"},
             )
 
         if vinyl_play["vinyl_id"] != vinyl_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Vinyl Id does not match Vinyl Play",
-                headers={"WWW-Authenticate": "Bearer"},
             )
 
         doc_ref.delete()
@@ -270,5 +293,4 @@ def delete_play(vinyl_id, play_id, user: FirebaseUserDep) -> None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No vinyl found by that id",
-            headers={"WWW-Authenticate": "Bearer"},
         )

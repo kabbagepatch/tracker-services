@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 from google.cloud.firestore import SERVER_TIMESTAMP
 
-from dependencies.firebase_auth import get_firebase_user_from_token
+from dependencies.firebase_auth import verify_user
 from schemas.discogs import DiscogsAlbum, DiscogsRelease, Track
 from schemas.vinyls import Vinyl, VinylPlay
 
@@ -17,7 +17,9 @@ client = TestClient(app)
 
 mock_user = {
     "uid": "user678",
-    "email": "testuser@example.com"
+    "name": "Test User",
+    "email": "testuser@example.com",
+    "user_data": { "uid": "user678", "name": "Test User", "email": "testuser@example.com" }
 }
 mock_vinyl = Vinyl(
     user_id="user678",
@@ -139,7 +141,7 @@ def mock_collection_fn(arg):
 @pytest.fixture(autouse=True)
 def run_before_each_test():
     limiter.enabled = False
-    app.dependency_overrides[get_firebase_user_from_token] = lambda: mock_user
+    app.dependency_overrides[verify_user] = lambda: mock_user
     yield
     app.dependency_overrides.clear()
     limiter.enabled = True
@@ -166,13 +168,15 @@ def mock_get_owned_vinyl(mock_vinyl_ref):
     with patch("routers.vinyls.get_owned_vinyl", return_value=(mock_vinyl, mock_vinyl_ref)) as mock:
         yield mock
 
+@patch("routers.vinyls.get_vinyl_count")
 @patch("routers.vinyls.get_top_colors")
 @patch("routers.vinyls.get_discogs_album")
 @patch("routers.vinyls.get_discogs_release")
-def test_create_vinyl_default(mock_get_discogs_release, mock_get_discogs_album, mock_get_top_colors, mock_collection, mock_document):
+def test_create_vinyl_default(mock_get_discogs_release, mock_get_discogs_album, mock_get_top_colors, mock_get_vinyl_count, mock_collection, mock_document):
     mock_get_discogs_release.return_value = mock_discogs_release
     mock_get_discogs_album.return_value = None
     mock_get_top_colors.return_value = []
+    mock_get_vinyl_count.return_value = 0
     mock_document.return_value.id = "vinyl1111"
     mock_document.return_value.get.return_value = mock_snapshot(data=mock_vinyl.model_dump())
 
@@ -187,13 +191,15 @@ def test_create_vinyl_default(mock_get_discogs_release, mock_get_discogs_album, 
         "created_at": SERVER_TIMESTAMP,
     })
 
+@patch("routers.vinyls.get_vinyl_count")
 @patch("routers.vinyls.get_top_colors")
 @patch("routers.vinyls.get_discogs_album")
 @patch("routers.vinyls.get_discogs_release")
-def test_create_vinyl_full(mock_get_discogs_release, mock_get_discogs_album, mock_get_top_colors, mock_collection, mock_document):
+def test_create_vinyl_full(mock_get_discogs_release, mock_get_discogs_album, mock_get_top_colors, mock_get_vinyl_count, mock_collection, mock_document):
     mock_get_discogs_release.return_value = mock_discogs_release_full
     mock_get_discogs_album.return_value = mock_discogs_album
     mock_get_top_colors.return_value = ['#14521a', '#51faa2']
+    mock_get_vinyl_count.return_value = 0
     mock_document.return_value.id = "vinyl1111"
     mock_document.return_value.get.return_value = mock_snapshot(data=mock_vinyl_full.model_dump())
 
@@ -226,9 +232,27 @@ def test_create_vinyl_full(mock_get_discogs_release, mock_get_discogs_album, moc
         "created_at": SERVER_TIMESTAMP,
     })
 
+def test_create_vinyl_no_user_data():
+    app.dependency_overrides[verify_user] = lambda: { "uid": "123" }
+
+    response = client.post("/vinyls", json={"release_id": "999"})
+
+    assert response.status_code == 500
+    assert response.json() == { 'detail': 'There was an error retrieving your user data. Please try again later.' }
+
+def test_create_vinyl_limit_reached(mock_collection):
+    mock_collection.return_value.where.return_value.where.return_value.count.return_value.get.return_value = [[MagicMock(value=1001)]]
+
+    response = client.post("/vinyls", json={"release_id": "999"})
+
+    assert response.status_code == 403
+    assert response.json() == { 'detail': 'Vinyl limit reached. Please delete some vinyls before adding more.' }
+
+@patch("routers.vinyls.get_vinyl_count")
 @patch("routers.vinyls.get_discogs_release")
-def test_create_vinyl_no_discogs_release(mock_get_discogs_release, mock_collection):
+def test_create_vinyl_no_discogs_release(mock_get_discogs_release, mock_get_vinyl_count, mock_collection):
     mock_get_discogs_release.return_value = None
+    mock_get_vinyl_count.return_value = 0
 
     response = client.post("/vinyls", json={"release_id": "999"})
 
