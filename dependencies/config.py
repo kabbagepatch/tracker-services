@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+  project_id: str = ''
+  recaptcha_key: str = ''
   frontend_url: str = 'http://localhost:5173'
   google_application_credentials: SecretStr | None = None 
   discogs_key: SecretStr

@@ -4,4 +4,4 @@ router = APIRouter()
 
 @router.get("/health", tags=["health"])
 def health():
-  return { "message": "We are live!", "version": "0.1.0" }
+  return { "message": "We are live!", "version": "0.2.0" }

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.extension import _rate_limit_exceeded_handler
@@ -12,6 +13,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
 from dependencies.config import get_settings
+from dependencies.recaptcha import create_assessment
 from firebase import init_firebase
 from middleware.process_time import ProcessTimeMiddleware
 from routers.discogs import router as discogs_router
@@ -65,3 +67,21 @@ app.include_router(vinyls_router)
 @app.get("/")
 async def root():
     return {"message": "Welcome to Tracker Services"}
+
+class RecaptchaInput(BaseModel):
+    token: str
+    action: str
+
+@app.post("/verify-recaptcha/")
+async def verify_recaptcha(input: RecaptchaInput):
+    project_id = get_settings().project_id
+    recaptcha_key = get_settings().recaptcha_key
+    if not project_id or not recaptcha_key:
+        print("Missing project_id or recaptcha_key")
+        return {"valid": False}
+
+    assessment = create_assessment(project_id, recaptcha_key, input.token, input.action)
+    if assessment is None or assessment.risk_analysis.score < 0.4:
+        return {"valid": False}
+
+    return {"valid": True}
