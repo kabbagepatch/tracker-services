@@ -1,12 +1,15 @@
+import logging
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from firebase_admin import app_check, exceptions
 from firebase_admin.auth import verify_id_token
 
 from dependencies.users import create_user, get_user_data
 
 bearer = HTTPBearer(auto_error=False)
+logger = logging.getLogger(__name__)
 
 UNVERIFIED_ROUTES = {"POST /users/", "GET /users/me", "PUT /users/me"}
 SECURE_ROUTES = {"POST /users/", "POST /vinyls/", "GET /vinyls/album/{album_id}", "GET /vinyls/release/{release_id}", "GET /vinyls/search"}
@@ -21,7 +24,7 @@ def verify_user(request: Request, token: Annotated[HTTPAuthorizationCredentials 
             raise ValueError("No token")
         user = verify_id_token(token.credentials, clock_skew_seconds=60, check_revoked=is_secure_route)
     except Exception as e:  # noqa: BLE001
-        print(f"Error occurred while verifying token: {e}")
+        logger.warning(f"Error occurred while verifying user token: {e}")
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -59,3 +62,20 @@ def verify_user(request: Request, token: Annotated[HTTPAuthorizationCredentials 
     return user
 
 VerifyUserDep = Annotated[dict, Depends(verify_user)]
+
+def verify_app_check(request: Request):
+    try:
+        app_check_token = request.headers.get("x-firebase-appcheck", "")
+        app_check.verify_token(app_check_token)
+    except ValueError as e:
+        logger.warning(f"Invalid app-check token: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your request could not be verified. Please try again later.",
+        )
+    except exceptions.FirebaseError as e:
+        logger.warning(f"A Firebase error occurred while verifying the app check token: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Your request could not be verified. Please try again later.",
+        )

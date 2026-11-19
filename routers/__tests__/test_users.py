@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from firebase_admin.exceptions import FirebaseError
 
-from dependencies.firebase_auth import verify_user
+from dependencies.firebase_auth import verify_app_check, verify_user
 from schemas.users import User
 
 from ..users import router
@@ -45,6 +45,7 @@ def mock_admin_check():
 @pytest.fixture(autouse=True)
 def run_before_each_test():
     app.dependency_overrides[verify_user] = override_firebase_user
+    app.dependency_overrides[verify_app_check] = lambda: True
 
     yield
 

@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 
-from dependencies.firebase_auth import verify_user
+from dependencies.firebase_auth import verify_app_check, verify_user
 from schemas.discogs import DiscogsAlbum, DiscogsRelease, Track
 
 from ..discogs import get_discogs_album, get_discogs_release, limiter, router
@@ -60,6 +60,7 @@ mock_discogs_album = DiscogsAlbum(
 def run_before_each_test():
     limiter.enabled = False
     app.dependency_overrides[verify_user] = lambda: mock_user
+    app.dependency_overrides[verify_app_check] = lambda: True
     yield
     app.dependency_overrides.clear()
     limiter.enabled = True

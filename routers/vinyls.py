@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from firebase_admin import firestore
 from google.cloud.firestore import SERVER_TIMESTAMP, DocumentReference
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from dependencies.firebase_auth import VerifyUserDep
+from dependencies.firebase_auth import VerifyUserDep, verify_app_check
 from dependencies.image_colors import get_top_colors
 from routers.discogs import get_discogs_album, get_discogs_release
 from schemas.vinyls import (
@@ -22,7 +22,8 @@ from schemas.vinyls import (
 
 router = APIRouter(
     prefix="/vinyls",
-    tags=["Vinyls"]
+    tags=["Vinyls"],
+    dependencies=[Depends(verify_app_check)]
 )
 
 def db():

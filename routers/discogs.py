@@ -1,16 +1,17 @@
 import httpx2 as httpx
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from dependencies.config import get_settings
-from dependencies.firebase_auth import VerifyUserDep
+from dependencies.firebase_auth import VerifyUserDep, verify_app_check
 from dependencies.users import set_discogs_requests
 from schemas.discogs import DiscogsAlbum, DiscogsRelease, DiscogsSearchResult
 
 router = APIRouter(
     prefix="/vinyls",
-    tags=["Vinyls"]
+    tags=["Vinyls"],
+    dependencies=[Depends(verify_app_check)]
 )
 
 def get_discogs_release(release_id):

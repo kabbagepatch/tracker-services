@@ -2,11 +2,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from firebase_admin import exceptions
 from firebase_admin.auth import InvalidIdTokenError
 
 from schemas.users import User
 
-from ..firebase_auth import verify_user
+from ..firebase_auth import verify_app_check, verify_user
 
 mock_firebase_user = {
     "uid": "user123",
@@ -232,3 +233,30 @@ def test_verify_user_create_user_call(mock_create_user, mock_verify_id_token, mo
     }
 
     mock_create_user.assert_not_called()
+
+@patch("dependencies.firebase_auth.app_check")
+def test_verify_app_check(mock_app_check, mock_request):
+    result = verify_app_check(mock_request)
+
+    assert result is None
+
+@patch("dependencies.firebase_auth.app_check")
+def test_verify_app_check_value_error(mock_app_check, mock_request):
+    mock_app_check.verify_token.side_effect = ValueError("Invalid token")
+
+    with pytest.raises(HTTPException) as exc_info:
+        verify_app_check(mock_request)
+    
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Your request could not be verified. Please try again later."
+
+
+@patch("dependencies.firebase_auth.app_check")
+def test_verify_app_check_firebase_error(mock_app_check, mock_request):
+    mock_app_check.verify_token.side_effect = exceptions.FirebaseError(code=500, message="Google gone")
+
+    with pytest.raises(HTTPException) as exc_info:
+        verify_app_check(mock_request)
+    
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Your request could not be verified. Please try again later."

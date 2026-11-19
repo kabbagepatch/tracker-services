@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 from google.cloud.firestore import SERVER_TIMESTAMP
 
-from dependencies.firebase_auth import verify_user
+from dependencies.firebase_auth import verify_app_check, verify_user
 from schemas.discogs import DiscogsAlbum, DiscogsRelease, Track
 from schemas.vinyls import Vinyl, VinylPlay
 
@@ -142,6 +142,7 @@ def mock_collection_fn(arg):
 def run_before_each_test():
     limiter.enabled = False
     app.dependency_overrides[verify_user] = lambda: mock_user
+    app.dependency_overrides[verify_app_check] = lambda: True
     yield
     app.dependency_overrides.clear()
     limiter.enabled = True

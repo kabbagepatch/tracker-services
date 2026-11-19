@@ -1,16 +1,17 @@
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from firebase_admin import auth, firestore
 from firebase_admin.exceptions import FirebaseError
 from google.cloud.firestore_v1.base_query import FieldFilter
 
-from dependencies.firebase_auth import VerifyUserDep
+from dependencies.firebase_auth import VerifyUserDep, verify_app_check
 from dependencies.users import admin_check, create_user, get_user_data
 from routers.vinyls import VINYL_PLAYS, VINYLS
 from schemas.users import User, UserInput, UserResponse
 
 router = APIRouter(
     prefix="/users",
-    tags=["Users"]
+    tags=["Users"],
+    dependencies=[Depends(verify_app_check)]
 )
 
 def db():

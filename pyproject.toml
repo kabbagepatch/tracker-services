@@ -9,7 +9,6 @@ dependencies = [
     "pydantic-settings~=2.16.1",
     "slowapi~=0.1.10",
     "pillow~=12.3.0",
-    "google-cloud-recaptcha-enterprise>=1.34.0",
 ]
 
 [dependency-groups]
