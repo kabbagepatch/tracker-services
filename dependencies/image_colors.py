@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 from urllib.parse import urlparse
 
@@ -6,6 +7,7 @@ from PIL import Image
 
 from dependencies.colorgram import extract
 
+logger = logging.getLogger(__name__)
 
 def get_top_colors(image_url):
     if not image_url:
@@ -29,6 +31,6 @@ def get_top_colors(image_url):
 
         colors = extract(image, 10)
         return [color.hex for color in colors]
-    except Exception as e:  # noqa: BLE001
-        print("Error opening image", e)
+    except Exception:
+        logger.exception("Error opening image")
         return []

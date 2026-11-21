@@ -128,8 +128,17 @@ def test_get_discogs_release_numeric_track_position(mock_get_settings, mock_Clie
     assert mock_client.get.call_args.args[0] == "https://api.discogs.com/releases/999"
 
 @patch("routers.discogs.get_settings")
-def test_get_discogs_release_error(mock_get_settings, mock_Client, mock_client):
+def test_get_discogs_release_http_error(mock_get_settings, mock_Client, mock_client):
     mock_client.get.return_value.raise_for_status.side_effect = httpx.HTTPStatusError("Error", request=MagicMock(), response=MagicMock())
+
+    result = get_discogs_release(999)
+
+    assert result is None
+    assert mock_client.get.call_args.args[0] == "https://api.discogs.com/releases/999"
+
+@patch("routers.discogs.get_settings")
+def test_get_discogs_release_error(mock_get_settings, mock_Client, mock_client):
+    mock_client.get.return_value.raise_for_status.side_effect = httpx.TimeoutException("Error", request=MagicMock())
 
     result = get_discogs_release(999)
 
@@ -155,8 +164,17 @@ def test_get_discogs_album(mock_get_settings, mock_Client, mock_client):
     assert mock_client.get.call_args.args[0] == "https://api.discogs.com/masters/555"
 
 @patch("routers.discogs.get_settings")
-def test_get_discogs_album_error(mock_get_settings, mock_Client, mock_client):
+def test_get_discogs_album_http_error(mock_get_settings, mock_Client, mock_client):
     mock_client.get.return_value.raise_for_status.side_effect = httpx.HTTPStatusError("Error", request=MagicMock(), response=MagicMock())
+
+    result = get_discogs_album(555)
+
+    assert result is None
+    assert mock_client.get.call_args.args[0] == "https://api.discogs.com/masters/555"
+
+@patch("routers.discogs.get_settings")
+def test_get_discogs_album_error(mock_get_settings, mock_Client, mock_client):
+    mock_client.get.return_value.raise_for_status.side_effect = httpx.TimeoutException("Error", request=MagicMock())
 
     result = get_discogs_album(555)
 
@@ -200,7 +218,7 @@ def test_get_album_not_found(mock_get_discogs_album):
     assert response.json() == {"detail": "Album not found"}
 
 @patch("routers.discogs.get_settings")
-def test_search_discogs_release(mock_get_settings, mock_Client, mock_client):
+def test_search_discogs(mock_get_settings, mock_Client, mock_client):
     mock_search_result = {
         "id": 999,
         "master_id": 555,
@@ -230,7 +248,7 @@ def test_search_discogs_release(mock_get_settings, mock_Client, mock_client):
     }]
 
 @patch("routers.discogs.get_settings")
-def test_search_discogs_release_empty(mock_get_settings, mock_Client, mock_client):
+def test_search_discogs_empty(mock_get_settings, mock_Client, mock_client):
     response = client.get("/vinyls/search?term=Carly")
     
     assert response.status_code == 200
@@ -291,3 +309,19 @@ def test_search_discogs_release_short_term(mock_get_discogs_album):
     
     assert response.status_code == 400
     assert response.json() == {"detail": "Search term of at least length 3 is required"}
+
+def test_search_discogs_http_error(mock_client):
+    mock_client.get.return_value.raise_for_status.side_effect = httpx.HTTPStatusError("Error", request=MagicMock(), response=MagicMock())
+    
+    response = client.get("/vinyls/search?term=Carly")
+    
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Error getting search results."}
+
+def test_search_discogs_error(mock_client):
+    mock_client.get.return_value.raise_for_status.side_effect = httpx.TimeoutException("Error", request=MagicMock())
+    
+    response = client.get("/vinyls/search?term=Carly")
+    
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Error getting search results."}

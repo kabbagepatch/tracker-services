@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from firebase_admin import auth, firestore
 from firebase_admin.exceptions import FirebaseError
@@ -13,6 +15,8 @@ router = APIRouter(
     tags=["Users"],
     dependencies=[Depends(verify_app_check)]
 )
+
+logger = logging.getLogger(__name__)
 
 def db():
     return firestore.client()
@@ -81,6 +85,7 @@ def delete_user(uid: str, user: VerifyUserDep):
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
     admin_check(user)
 
+    logger.info(f"User {uid} delete started by admin {user['uid']}")
     batch = db().batch()
     vinyls_doc_ref = db().collection(VINYLS).where(filter=FieldFilter("user_id", "==", uid))
     for vinyl_doc in vinyls_doc_ref.stream():
@@ -95,7 +100,13 @@ def delete_user(uid: str, user: VerifyUserDep):
 
     batch.commit()
 
+    logger.info(f"User {uid} vinyl data deleted successfully")
+
     try:
         auth.delete_user(uid)
     except FirebaseError:
-        raise HTTPException(status_code=500, detail="Failed to delete user from authentication. Database deletion may have occurred.")
+        message = "Failed to delete user from authentication. Database deletion may have occurred."
+        logger.exception(message)
+        raise HTTPException(status_code=500, detail=message)
+
+    logger.info(f"User {uid} delete completed by admin {user['uid']}")

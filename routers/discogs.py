@@ -1,3 +1,5 @@
+import logging
+
 import httpx2 as httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from slowapi import Limiter
@@ -14,14 +16,20 @@ router = APIRouter(
     dependencies=[Depends(verify_app_check)]
 )
 
+logger = logging.getLogger(__name__)
+
 def get_discogs_release(release_id):
     with httpx.Client() as client:
         settings = get_settings()
         headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
-        discogs_response = client.get(f'https://api.discogs.com/releases/{release_id}', headers=headers)
         try:
+            discogs_response = client.get(f'https://api.discogs.com/releases/{release_id}', headers=headers)
             discogs_response.raise_for_status()
-        except httpx.HTTPStatusError:
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Error getting discogs release: {e}")
+            return
+        except Exception:
+            logger.exception("Error getting discogs release")
             return
 
         data = discogs_response.json()
@@ -49,9 +57,15 @@ def get_discogs_album(master_id):
     with httpx.Client() as client:
         settings = get_settings()
         headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
-        discogs_response = client.get(f'https://api.discogs.com/masters/{master_id}', headers=headers)
-        try: discogs_response.raise_for_status()
-        except httpx.HTTPStatusError: return
+        try:
+            discogs_response = client.get(f'https://api.discogs.com/masters/{master_id}', headers=headers)
+            discogs_response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Error getting discogs master: {e}")
+            return
+        except Exception:
+            logger.exception("Error getting discogs master")
+            return
 
         data = discogs_response.json()
         return DiscogsAlbum(
@@ -108,11 +122,25 @@ def search_discogs_release(request: Request, user: VerifyUserDep, response: Resp
     with httpx.Client() as client:
         settings = get_settings()
         headers = { "Authorization": f"Discogs key={settings.discogs_key.get_secret_value()}, secret={settings.discogs_secret.get_secret_value()}" }
-        discogs_response = client.get(
-            'https://api.discogs.com/database/search',
-            headers=headers,
-            params={ "q": term, "type": "release", "format": "Vinyl" }
-        )
+        try:
+            discogs_response = client.get(
+                'https://api.discogs.com/database/search',
+                headers=headers,
+                params={ "q": term, "type": "release", "format": "Vinyl" }
+            )
+            discogs_response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Error getting search results: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error getting search results.",
+            )
+        except Exception:
+            logger.exception("Error getting search results")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Error getting search results.",
+            )
 
     if user.get("is_guest", True):
         set_discogs_requests(user["uid"], requests_remaining - 1)

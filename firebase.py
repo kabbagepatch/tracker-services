@@ -1,8 +1,11 @@
+import logging
+
 import firebase_admin
 from firebase_admin import credentials
 
 from dependencies.config import get_settings
 
+logger = logging.getLogger(__name__)
 
 def init_firebase():
     if not firebase_admin._apps:
@@ -13,4 +16,4 @@ def init_firebase():
             firebase_admin.initialize_app(cred)
         else:
             firebase_admin.initialize_app()
-        print("Current App Name:", firebase_admin.get_app().project_id)
+        logger.info(f"Current App Name: {firebase_admin.get_app().project_id}")

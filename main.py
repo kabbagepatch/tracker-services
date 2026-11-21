@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -20,6 +21,11 @@ from routers.health import router as health_router
 from routers.users import router as users_router
 from routers.vinyls import router as vinyls_router
 
+if os.environ.get("K_SERVICE"):
+    import google.cloud.logging
+    logging_client = google.cloud.logging.Client()
+    logging_client.setup_logging()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -40,7 +46,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler) # pyr
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
     message = "Your request contains invalid data."
-    errors = f"Request Validation errors for {request.method} {request.url} by {request.client.host}:\n"
+    errors = f"Request Validation errors for {request.method} {request.url} by {request.client.host if request.client else 'Unknown host'}:\n"
     for error in exc.errors():
         errors += f"Field: {error['loc']}, Error: {error['msg']}\n"
 

@@ -1,6 +1,6 @@
 [project]
 name = "tracker-services"
-version = "0.2.0"
+version = "0.2.1"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi[standard]~=0.143.0",
@@ -9,6 +9,7 @@ dependencies = [
     "pydantic-settings~=2.16.1",
     "slowapi~=0.1.10",
     "pillow~=12.3.0",
+    "google-cloud-logging>=3.17.0",
 ]
 
 [dependency-groups]

@@ -68,13 +68,13 @@ def verify_app_check(request: Request):
         app_check_token = request.headers.get("x-firebase-appcheck", "")
         app_check.verify_token(app_check_token)
     except ValueError as e:
-        logger.warning(f"Invalid app-check token: {e}")
+        logger.warning(e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Your request could not be verified. Please try again later.",
         )
-    except exceptions.FirebaseError as e:
-        logger.warning(f"A Firebase error occurred while verifying the app check token: {e}")
+    except exceptions.FirebaseError:
+        logger.exception("A Firebase error occurred while verifying the app check token")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Your request could not be verified. Please try again later.",
