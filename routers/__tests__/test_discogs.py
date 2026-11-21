@@ -310,7 +310,8 @@ def test_search_discogs_release_short_term(mock_get_discogs_album):
     assert response.status_code == 400
     assert response.json() == {"detail": "Search term of at least length 3 is required"}
 
-def test_search_discogs_http_error(mock_client):
+@patch("routers.discogs.get_settings")
+def test_search_discogs_http_error(mock_get_settings, mock_client):
     mock_client.get.return_value.raise_for_status.side_effect = httpx.HTTPStatusError("Error", request=MagicMock(), response=MagicMock())
     
     response = client.get("/vinyls/search?term=Carly")
@@ -318,7 +319,8 @@ def test_search_discogs_http_error(mock_client):
     assert response.status_code == 500
     assert response.json() == {"detail": "Error getting search results."}
 
-def test_search_discogs_error(mock_client):
+@patch("routers.discogs.get_settings")
+def test_search_discogs_error(mock_get_settings, mock_client):
     mock_client.get.return_value.raise_for_status.side_effect = httpx.TimeoutException("Error", request=MagicMock())
     
     response = client.get("/vinyls/search?term=Carly")

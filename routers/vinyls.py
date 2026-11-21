@@ -3,11 +3,10 @@ from firebase_admin import firestore
 from google.cloud.firestore import SERVER_TIMESTAMP, DocumentReference
 from google.cloud.firestore_v1.base_query import FieldFilter
 from pydantic import BaseModel
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from dependencies.firebase_auth import VerifyUserDep, verify_app_check
 from dependencies.image_colors import get_top_colors
+from dependencies.limiter import limiter
 from routers.discogs import get_discogs_album, get_discogs_release
 from schemas.vinyls import (
     Vinyl,
@@ -32,10 +31,6 @@ def db():
 VINYLS = "vinyls"
 VINYL_PLAYS = "vinyl_plays"
 
-def uid_key(request: Request):
-    return getattr(request.state, "uid", None) or get_remote_address(request)
-limiter = Limiter(key_func=uid_key)
-
 def get_vinyl_count(user_id):
     count = (
         db().collection(VINYLS)
@@ -49,7 +44,7 @@ def get_vinyl_count(user_id):
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 @limiter.limit("20/minute")
-@limiter.limit("50/minute", key_func=get_remote_address)
+@limiter.shared_limit("50/minute", scope="discogs_group", key_func=lambda: "discogs", cost=2)
 def add_vinyl(request: Request, data: VinylCreate, user: VerifyUserDep, response: Response) -> VinylResponse:
     user_data = user.get("user_data")
     if not user_data:
@@ -100,7 +95,6 @@ def add_vinyl(request: Request, data: VinylCreate, user: VerifyUserDep, response
 
 @router.get("/")
 @limiter.limit("60/minute")
-@limiter.limit("100/minute", key_func=get_remote_address)
 def list_vinyls(request: Request, user: VerifyUserDep) -> list[VinylResponse]:
     docs = (
         db().collection(VINYLS)
@@ -114,7 +108,6 @@ def list_vinyls(request: Request, user: VerifyUserDep) -> list[VinylResponse]:
 
 @router.get("/activity")
 @limiter.limit("60/minute")
-@limiter.limit("100/minute", key_func=get_remote_address)
 def get_user_plays(request: Request, user: VerifyUserDep) -> list[VinylPlayResponse]:
     play_docs = (
         db().collection(VINYL_PLAYS)

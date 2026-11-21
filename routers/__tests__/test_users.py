@@ -141,8 +141,6 @@ def test_update_user(mock_collection, mock_document):
         "name": "Updated User",
         "email": "testuser@example.com",
         "vinyl_limit": 1000,
-        "anonymous_discogs_requests_remaining": 20,
-        "admin": False,
     })
 
 def test_update_user_no_email(mock_document):

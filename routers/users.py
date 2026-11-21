@@ -60,15 +60,15 @@ def update_me(data: UserInput, user: VerifyUserDep) -> UserResponse:
     if not user.get("email", None):
         raise HTTPException(status_code=400, detail="Email is required for updating user profile")
 
-    user_updates = User(
-        uid=user["uid"],
-        name=data.name,
-        email=user["email"],
-        vinyl_limit=1000,
-    )
-    doc_ref.update(user_updates.model_dump())
+    user_updates = {
+        "uid": user["uid"],
+        "name": data.name,
+        "email": user["email"],
+        "vinyl_limit": 1000,
+    }
+    doc_ref.update(user_updates)
 
-    return user_updates
+    return UserResponse.model_validate(user_updates)
 
 @router.get("/{uid}")
 def get_user(uid: str, user: VerifyUserDep) -> UserResponse:

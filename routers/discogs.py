@@ -2,11 +2,10 @@ import logging
 
 import httpx2 as httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from dependencies.config import get_settings
 from dependencies.firebase_auth import VerifyUserDep, verify_app_check
+from dependencies.limiter import limiter
 from dependencies.users import set_discogs_requests
 from schemas.discogs import DiscogsAlbum, DiscogsRelease, DiscogsSearchResult
 
@@ -77,13 +76,9 @@ def get_discogs_album(master_id):
             image_url=(data.get("images") or [{}])[0].get("uri", "")
         )
 
-def uid_key(request: Request):
-    return getattr(request.state, "uid", None) or get_remote_address(request)
-limiter = Limiter(key_func=uid_key)
-
 @router.get("/release/{release_id}")
 @limiter.limit("10/minute")
-@limiter.limit("20/minute", key_func=get_remote_address)
+@limiter.shared_limit("50/minute", scope="discogs_group", key_func=lambda: "discogs")
 def get_release(request: Request, release_id: int, _: VerifyUserDep) -> DiscogsRelease:
     release = get_discogs_release(release_id)
     if not release:
@@ -92,7 +87,7 @@ def get_release(request: Request, release_id: int, _: VerifyUserDep) -> DiscogsR
 
 @router.get("/album/{master_id}")
 @limiter.limit("10/minute")
-@limiter.limit("20/minute", key_func=get_remote_address)
+@limiter.shared_limit("50/minute", scope="discogs_group", key_func=lambda: "discogs")
 def get_album(request: Request, master_id: int, _: VerifyUserDep) -> DiscogsAlbum:
     album = get_discogs_album(master_id)
     if not album:
@@ -101,7 +96,7 @@ def get_album(request: Request, master_id: int, _: VerifyUserDep) -> DiscogsAlbu
 
 @router.get("/search")
 @limiter.limit("10/minute")
-@limiter.limit("20/minute", key_func=get_remote_address)
+@limiter.shared_limit("50/minute", scope="discogs_group", key_func=lambda: "discogs")
 def search_discogs_release(request: Request, user: VerifyUserDep, response: Response, term: str = '') -> list[DiscogsSearchResult]:
     if len(term) <= 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search term of at least length 3 is required")

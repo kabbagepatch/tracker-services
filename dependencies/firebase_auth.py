@@ -19,10 +19,11 @@ def verify_user(request: Request, token: Annotated[HTTPAuthorizationCredentials 
     route = request.scope.get("route")
     method = request.scope.get("method")
     is_secure_route = bool(route and f"{method} {route.path}" in SECURE_ROUTES)
+    is_admin_route = bool(route and f"{method} {route.path}" in ADMIN_ROUTES)
     try:
         if not token:
             raise ValueError("No token")
-        user = verify_id_token(token.credentials, clock_skew_seconds=60, check_revoked=is_secure_route)
+        user = verify_id_token(token.credentials, clock_skew_seconds=60, check_revoked=(is_secure_route or is_admin_route))
     except Exception as e:  # noqa: BLE001
         logger.warning(f"Error occurred while verifying user token: {e}")
 
@@ -35,7 +36,7 @@ def verify_user(request: Request, token: Annotated[HTTPAuthorizationCredentials 
     is_guest = user.get("firebase", {}).get("sign_in_provider") == "anonymous"
     user_data = get_user_data(user["uid"])
 
-    if route and f"{method} {route.path}" in ADMIN_ROUTES and (not user_data or not user_data.admin):
+    if is_admin_route and (not user_data or not user_data.admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to access this resource",

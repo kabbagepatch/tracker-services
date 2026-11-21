@@ -36,7 +36,7 @@ class Vinyl(VinylResponse):
 
 class VinylPlayCreate(BaseModel):
     sides: list[int] = Field(default=[], max_length=26)
-    timestamp: datetime | str = ''
+    timestamp: datetime | str = Field(default='', max_length=200)
 
 class VinylPlay(VinylPlayCreate):
     user_id: str

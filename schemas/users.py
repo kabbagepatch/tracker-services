@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 
 class UserInput(BaseModel):
-    name: str = ""
+    name: str = Field(default='', max_length=200)
 
 class UserResponse(UserInput):
     email: str = ""

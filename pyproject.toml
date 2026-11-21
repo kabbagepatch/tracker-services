@@ -47,7 +47,7 @@ omit = [
     "./middleware/*",
     "./dependencies/config.py",
     "./dependencies/colorgram.py",
-    "./dependencies/recaptcha.py",
+    "./dependencies/limiter.py",
     "./main.py",
     "./firebase.py",
 ]
