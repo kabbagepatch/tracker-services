@@ -25,6 +25,6 @@ class ProcessTimeMiddleware(BaseHTTPMiddleware):
                     "method": request.method,
                     "route": route.path if route else request.url.path,
                     "status": status_code,
-                    "process_time": process_time
+                    "process_time": time.perf_counter() - start_time
                 }
                 logger.info(f"{request.method} {metadata["route"]}: {status_code}", extra={"json_fields": metadata})

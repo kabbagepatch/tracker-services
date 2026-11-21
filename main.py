@@ -26,6 +26,10 @@ if os.environ.get("K_SERVICE"):
     logging_client = google.cloud.logging.Client()
     logging_client.setup_logging()
 
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.handlers.clear()
+    uvicorn_logger.propagate = True
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
