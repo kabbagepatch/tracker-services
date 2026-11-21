@@ -36,7 +36,7 @@ class Vinyl(VinylResponse):
 
 class VinylPlayCreate(BaseModel):
     sides: list[int] = Field(default=[], max_length=26)
-    timestamp: datetime | str = Field(default='', max_length=200)
+    timestamp: datetime | None = None
 
 class VinylPlay(VinylPlayCreate):
     user_id: str
@@ -55,7 +55,7 @@ class VinylPlayResponse(VinylPlayCreate):
 class VinylPlayItem(BaseModel):
     play_id: str
     sides: list[int]
-    timestamp: datetime | str
+    timestamp: datetime
 class VinylPlaysResponse(BaseModel):
     vinyl_id: str
     album: str = Field(default='', max_length=200)

@@ -1,3 +1,4 @@
+import datetime
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -102,19 +103,19 @@ mock_vinyl_play = VinylPlay(
     user_id="user678",
     vinyl_id="123",
     sides=[1, 2, 3, 4],
-    timestamp="2024-06-06T12:00:00Z"
+    timestamp=datetime.datetime(2024, 6, 6, 12, tzinfo=datetime.UTC)
 )
 mock_vinyl_play2 = VinylPlay(
     user_id="user678",
     vinyl_id="123",
     sides=[1, 2],
-    timestamp="2025-06-06T12:00:00Z"
+    timestamp=datetime.datetime(2025, 6, 6, 12, tzinfo=datetime.UTC)
 )
 mock_vinyl_play3 = VinylPlay(
     user_id="user678",
     vinyl_id="bad",
     sides=[1, 2],
-    timestamp="2025-06-06T12:00:00Z"
+    timestamp=datetime.datetime(2025, 6, 6, 12, tzinfo=datetime.UTC)
 )
 
 def mock_snapshot(exists=True, data=None, id="123"):
@@ -384,18 +385,18 @@ def test_create_vinyl_play_with_data(mock_get_owned_vinyl, mock_collection, mock
         "user_id": "user678",
         "vinyl_id": "123",
         "sides": [1,2],
-        "timestamp": "2025-06-05T14:48:00.000Z",
+        "timestamp": datetime.datetime(2025, 6, 5, 14, 48),
     }
     mock_document.return_value.get.return_value = mock_snapshot(data=mock_play_data, id="play111")
     mock_document.return_value.id = "play111"
 
-    response = client.post("/vinyls/123/plays", json={ "sides": [1,2], "timestamp": "2025-06-05T14:48:00.000Z" })
+    response = client.post("/vinyls/123/plays", json={ "sides": [1,2], "timestamp": "2025-06-05T14:48:00" })
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.json() == {
         "vinyl_id": "123",
         "sides": [1,2],
-        "timestamp": "2025-06-05T14:48:00.000Z",
+        "timestamp": "2025-06-05T14:48:00",
         "play_id": "play111",
         "album": mock_vinyl.album,
         "artist": mock_vinyl.artist,
